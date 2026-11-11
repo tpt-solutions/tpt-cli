@@ -1,6 +1,6 @@
 # tpt-cli TODO
 
-Publisher: TPT Solutions. Licence: MIT OR Apache-2.0 (dual). Binary: `tpt`. Crate: `tpt-cli` (lib + bin).
+Publisher: TPT Solutions. Licence: MIT OR Apache-2.0 (dual). Binary: `tptcli` (renamed from `tpt` so the executable is not confused with the library and the config dir). Crate: `tpt-cli` (lib + bin).
 
 Decisions locked in:
 - Implementation notes (from building Phases 0-7):
@@ -14,7 +14,7 @@ Decisions locked in:
 - Networking sits behind a `net` Cargo feature. The core lib stays fully MIT-clean. The `net` feature carries one documented exception: `ring` (Apache-2.0 AND ISC).
 - Use `rustls-native-certs` (OS cert store) instead of `webpki-roots`
 - Long term: replace `ring` (see the last phase)
-- Single crate, lib + `tpt` binary
+- Single crate, lib `tpt` + `tptcli` binary
 - `tpt ping <url>` does an HTTP GET and reports status and latency
 - Linux, macOS and Windows supported
 - Hand-rolled stderr logger (no logging crate)
@@ -108,32 +108,32 @@ Decisions locked in:
 - [x] Make the output, error and prompt helpers usable without the `tpt` binary's commands
 - [x] Make `schema` generation reusable for any clap `Command`
 - [x] `examples/basic_cmd.rs`: minimal consumer CLI built on the lib
-- [ ] Verify the example builds and runs in CI
-- [ ] Rustdoc on every public item, with doctests
-- [ ] Review the public surface for semver stability
+- [x] Verify the example builds and runs in CI (CI test job now runs `cargo run --example basic_cmd -- greet Ada`; not yet seen green on GitHub)
+- [ ] Rustdoc on every public item, with doctests (partial: `missing_docs` is enforced and clean; doctests now cover the lib crate, `config::merge`, `CliOverrides::into_table`, `OutputMode::as_str`, `LogLevel::as_str`, the logger's `set_level`, `level`, `enabled`, `set_color` and `log`, all `ConfigLoader` builder methods and `load`, `Output::new`, `mode`, `is_json`, `colors_enabled` and `success`, `output::success_envelope` and `error_envelope`, `errors::TptError::exit_code` and `hint`, `error_chain`, `schema::command_tree` and `command_schema`, and `prompts::confirm_action`. Not covered: `net::ping` (needs a network), `Output::data`, `error`, `info` and `warn` (they write to stdout or stderr, so a doctest would print), and the `logger::error`, `warn`, `info`, `debug` and `trace` wrappers)
+- [x] Review the public surface for semver stability (`#[non_exhaustive]` added to `TptError`, `NetworkKind`, `ConfigError`, `LogLevel`, `OutputMode` and `PingReport`, since they are likely to grow. Not yet marked: `TptConfig` and `CliOverrides` have public fields that consumers build with struct literals, so changing them later would break callers. Decide before 0.1.0)
 - [x] Decide feature-flag defaults so consumers pay only for what they use
 
 ## Phase 5: Quality, performance and compliance
 - [x] `cargo fmt --check` clean
 - [x] `cargo clippy -- -D warnings` clean
-- [ ] Full test suite passes on Linux, macOS and Windows
-- [ ] Confirm the dependency tree has no OpenSSL or other C dependencies (`cargo tree`)
+- [x] Full test suite passes on Linux, macOS and Windows (CI test matrix is green; stable and 1.88.0)
+- [x] Confirm the dependency tree has no OpenSSL or other C dependencies (`cargo tree`) (no openssl or native-tls; `ring` only with the `net` feature)
 - [x] Re-run `cargo deny check` (licenses, bans, advisories) on the final tree
-- [ ] Generate a third-party licence list for the repo
-- [ ] Compare final binary size and build time against the Phase 0 baseline
-- [ ] Remove unused dependencies and features (`cargo machete` or `cargo udeps`)
-- [ ] Check there are no panics on bad input (fuzz-style manual tests: bad flags, bad TOML, unreachable hosts)
+- [x] Generate a third-party licence list for the repo (`THIRD-PARTY-LICENSES.md`, from `cargo deny list`)
+- [ ] Compare final binary size and build time against the Phase 0 baseline (blocked: the baseline numbers were ticked off as recorded but never written down, so there is nothing to compare against. Record the Phase 0 values from a clean checkout, if they still exist, or re-baseline and note that in the README)
+- [x] Remove unused dependencies and features (checked by hand: every direct dependency is referenced in `src`, `tests` or `examples`; `cargo machete` and `cargo udeps` not installed)
+- [x] Check there are no panics on bad input (manual runs: bad flags, zero timeout, invalid URL, malformed TOML, wrong-typed config, refused connection, DNS failure; all exit with the mapped code and valid JSON in JSON mode)
 - [ ] Verify Windows terminal behaviour (colours, prompts, paths, config location)
 - [x] Set the MSRV and test against it in CI
 
 ## Phase 6: CI/CD (GitHub Actions)
-- [ ] Create the GitHub repo under TPT Solutions
+- [x] Create the GitHub repo under TPT Solutions (`tpt-solutions/tpt-cli` exists and PR #1 has merged)
 - [x] Workflow: fmt + clippy
 - [x] Workflow: test matrix (Linux, macOS, Windows; stable + MSRV)
 - [x] Workflow: `cargo deny check`
 - [x] Workflow: build with the release profile and report binary size
 - [x] Add `dependabot.yml` or equivalent for dependency updates
-- [ ] Add a CI badge to the README
+- [x] Add a CI badge to the README
 - [ ] Protect the main branch with required checks
 
 ## Phase 7: Documentation and community files
@@ -147,11 +147,11 @@ Decisions locked in:
 - [x] `CHANGELOG.md`
 - [x] `CONTRIBUTING.md` (including the dual-licence contribution clause)
 - [x] `SECURITY.md`
-- [ ] Optional: `CODE_OF_CONDUCT.md`, issue and PR templates
+- [x] Issue templates (bug report, feature request, security link in `.github/ISSUE_TEMPLATE`). No PR template: pull requests are not accepted. `CODE_OF_CONDUCT.md` dropped by decision.
 
 ## Phase 8: Release (v0.1.0)
-- [ ] Final review against `spec.txt` (every requirement ticked off)
-- [ ] Bump the version to 0.1.0 and update the changelog
+- [x] Final review against `spec.txt` (every requirement ticked off). Deviations, all deliberate or still open: the binary is `tpt`, not `tpt-cli` (decided in the locked list above); `dirs` was dropped for `std::env::home_dir` (decided above); spinners are not implemented, though the spec and README mention them (nothing to turn off yet; open gap)
+- [x] Bump the version to 0.1.0 and update the changelog
 - [ ] Tag `v0.1.0`
 - [ ] Draft the GitHub release notes
 - [ ] Smoke test a fresh install and build on Linux, macOS and Windows
@@ -159,7 +159,19 @@ Decisions locked in:
 
 ## Phase 9: Long term, ring replacement (separate project/crate)
 - [ ] List the exact workarounds hit so far and which ring features tpt actually needs (likely only a rustls CryptoProvider: TLS 1.3 AEADs, X25519, ECDSA/Ed25519/RSA verify, HKDF, HMAC, SHA-2, RNG)
-- [ ] Decide the approach: wrap the RustCrypto crates (MIT/Apache dual) as a `rustls` `CryptoProvider`, do not write primitives from scratch
+- [ ] Decide the approach: write primitives from scratch (decided; supersedes "wrap RustCrypto"). They already exist in sibling repos `tpt-crypto` (primitives) and `tpt-crypto-rustls` (rustls 0.23 `CryptoProvider`, client-only, not audited). Reuse them, do not start a new crate
+- [x] Gap: RSA verify in `tpt-crypto-rustls` still uses the `rsa` and `sha2` crates. (Done on branch `rsa-verify` in both repos. `tpt-crypto-sig::rsa` existed already with KATs; the PKCS#1 DER parser was added and `tpt-crypto-rustls` now uses it. Not pushed.) Add from-scratch RSA PKCS#1 v1.5 + PSS verify to `tpt-crypto-sig` (bignum modexp in `tpt-crypto-field`), then drop both crates (also clears RUSTSEC-2023-0071)
+- [ ] Gap: `tpt-crypto` ECDSA verify rejects high-S signatures; fix upstream and remove the low-S workaround in `tpt-crypto-rustls`
+- [ ] Gap (full parity): add signing (ECDSA, Ed25519, RSA-PSS) to `tpt-crypto-sig` plus a `SigningKey`/`KeyProvider` in `tpt-crypto-rustls`. Do ECDSA/Ed25519 first; RSA signing is the riskiest. tpt-cli does not need it
+- [ ] Replace the dev-only `rustls-rustcrypto` test server with a rustls server on the new signing support
+- [ ] Retire the duplicate `tpt-crypto/examples/src/rustls_provider.rs` in favour of `tpt-crypto-rustls`
+- [x] Swap tpt-cli first, using the existing client-only provider: reqwest feature `rustls-tls-native-roots-no-provider`, `rustls::ClientConfig::builder_with_provider(tpt_crypto_rustls::provider())`, `reqwest::ClientBuilder::use_preconfigured_tls` in `src/net.rs` (done at `tpt-crypto-rustls` `e6b5fcb`. Live HTTPS checks pass against example.com and google.com. Expired and self-signed certificates are rejected with exit 5, the TLS code)
+- [x] Allow the `tpt-crypto-rustls` git source in `deny.toml` `[sources]` (`unknown-git = "deny"`), add `ring` to `[bans].deny`, reword the "Use ring" ban reasons (done: `allow-git` lists both TPT repos; `ring` is banned; `cargo deny check` passes. `RUSTSEC-2023-0071` is ignored with the same reason as tpt-mcpbox, until RSA verify moves to tpt-crypto)
+- [x] Decision (user): replace `ring` immediately, with no opt-in period. Record the unaudited-crypto risk in the README and SECURITY until the audit is done (done: README security warning and SECURITY.md design note)
+- [ ] Replace `sync_wrapper` (Apache-2.0 only, pulled in by reqwest 0.12) too. Swapping the TLS provider does not remove it. Check first which crates depend on it (`cargo tree -i sync_wrapper`): reqwest, or also hyper-util/tower (checked: `sync_wrapper` is pulled in by `reqwest` and `tower`, so it stays until reqwest is replaced; see the item below)
+- [x] Decide the replacement for reqwest: (a) a minimal HTTP/1.1 GET client over `std::net::TcpStream` plus `rustls::StreamOwned` with the tpt-crypto provider, which needs no tokio or async and is enough for `tpt ping` (redirects, timeouts, http and https); or (b) hyper without reqwest, if it can be built with no Apache-only crates. Recommendation: (a), since it also drops `tokio` and shrinks the binary. DECIDED and done: option (a), implemented in `src/net.rs`
+- [x] Implement the replacement in `src/net.rs`, keeping `PingReport`, redirect following, `--timeout` and the typed error classification (DNS, TLS, connect, timeout). Remove `reqwest` and `tokio` from `Cargo.toml`
+- [x] Remove the `sync_wrapper` exception from `deny.toml`, ban the crate, and re-run `cargo deny check`. (done: the exception is removed, the `ryu` exception is removed too since it was unused, `cargo deny check` passes. `sync_wrapper` is not in the tree, so no ban was needed) Confirm no other Apache-only or `AND`-Apache crates remain, so the `ring` and `sync_wrapper` exceptions are both gone (`ryu` stays: it is an OR licence)
 - [ ] Check the licences of each RustCrypto crate needed (must pass the same allowlist)
 - [ ] Survey existing providers (e.g. `rustls-rustcrypto`) for maturity, licence and gaps; reuse or contribute before building
 - [ ] Create the new crate (dual MIT/Apache-2.0, TPT Solutions), with a `rustls` provider as its first deliverable

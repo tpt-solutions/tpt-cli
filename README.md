@@ -1,10 +1,12 @@
 # tpt-cli
 
+[![CI](https://github.com/tpt-solutions/tpt-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/tpt-solutions/tpt-cli/actions/workflows/ci.yml)
+
 `tpt-cli` is a small Rust framework and the `tpt` command for building command-line
 tools that people and AI agents can both use. It is built and maintained by TPT Solutions.
 
 - **Fast to compile and small.** Heavy features (networking, prompts) sit behind Cargo features.
-- **Agent-ready.** `--output json` gives a strict JSON envelope on stdout. `tpt schema`
+- **Agent-ready.** `--output json` gives a strict JSON envelope on stdout. `tptcli schema`
   describes every command as JSON.
 - **Permissively licensed.** `MIT OR Apache-2.0`. See [Licensing](#licensing).
 
@@ -19,7 +21,7 @@ cargo install --path .
 Or build it in place:
 
 ```sh
-cargo build --release   # binary at target/release/tpt
+cargo build --release   # binary at target/release/tptcli
 ```
 
 Linux, macOS and Windows are supported.
@@ -28,31 +30,31 @@ Linux, macOS and Windows are supported.
 
 ```sh
 tpt --help
-tpt ping https://example.com
+tptcli ping https://example.com
 tpt --output json ping https://example.com
-tpt schema
+tptcli schema
 ```
 
-Example output of `tpt ping`:
+Example output of `tptcli ping`:
 
 ```text
 https://example.com/ 200 OK in 84.21 ms (timeout 10s)
 ```
 
-### `tpt ping <url>`
+### `tptcli ping <url>`
 
 Sends an HTTP GET request and reports the status code and latency. Any HTTP status counts
 as a reply, so a `503` is reported with exit code 0. Only `http` and `https` URLs are
 accepted. Redirects are followed.
 
 ```sh
-tpt ping https://example.com --timeout 3
+tptcli ping https://example.com --timeout 3
 ```
 
-### `tpt schema [COMMAND]`
+### `tptcli schema [COMMAND]`
 
 Prints the command tree as JSON, so agents can find commands and arguments without parsing
-`--help`. `tpt schema ping` describes one command. The output is always JSON, in every
+`--help`. `tptcli schema ping` describes one command. The output is always JSON, in every
 output mode.
 
 Top-level fields: `schema_version`, `name`, `about`, `args`, `subcommands`, `exit_codes`
@@ -135,7 +137,7 @@ Error `code` values: `usage`, `config`, `dns`, `tls`, `connection`, `timeout`, `
 | 8 | io | A local file or I/O operation failed. |
 | 130 | aborted | The user aborted the operation. |
 
-The same table is in `tpt schema` under `exit_codes`.
+The same table is in `tptcli schema` under `exit_codes`.
 
 ## Library usage
 
@@ -165,11 +167,17 @@ Main modules:
 
 | Feature | Default | Adds | Notes |
 |---|---|---|---|
-| `net` | yes | `reqwest` (rustls, `ring`), `tokio` | The only feature that pulls in `ring`. |
+| `net` | yes | `rustls`, `tpt-crypto-rustls`, `url`, `http` (no async runtime) | TLS crypto comes from the pure-Rust `tpt-crypto-rustls` provider. |
 | `prompts` | yes | `dialoguer` | Interactive confirmation prompts. |
 
-`cargo build --no-default-features` builds the core library with no `ring` and no
-Apache-only crates. The `tpt` binary requires `net`.
+`cargo build --no-default-features` builds the core library with no TLS and no
+network code. The `tptcli` binary requires `net`. Neither build contains `ring` or any C crypto.
+
+> **Security warning: the TLS provider is not audited.** `tptcli ping` uses
+> `tpt-crypto-rustls`, a rustls provider built on `tpt-crypto`. Both are hand-written pure-Rust
+> crypto that has not been independently audited or formally verified. Treat HTTPS results from
+> `tptcli ping` as best-effort until the audit is done. Do not rely on them to protect sensitive
+> traffic. See [SECURITY.md](SECURITY.md).
 
 ## Licensing
 
@@ -185,11 +193,14 @@ Copyright (c) 2026 TPT Solutions.
 - Every exception is listed in [`deny.toml`](deny.toml) with a reason. Check with
   `cargo deny check licenses`.
 
-### The `ring` exception
+### Dependency exceptions
 
-`ring` 0.17 is licensed `Apache-2.0 AND ISC`. It comes in through rustls, only with the
-`net` feature. The core library has no `ring`. Replacing it is planned as a separate project
-(see `todo.md`, Phase 9).
+No licence exceptions remain. The one documented advisory exception is in [`deny.toml`](deny.toml):
+
+- `RUSTSEC-2023-0071` (`rsa`, Marvin timing attack): `rsa` is used by `tpt-crypto-rustls` for
+  server-certificate verification only, with no private-key operations. Review by 2027-02-10.
+
+`ring` is no longer a dependency. It was replaced by `tpt-crypto-rustls` (`todo.md`, Phase 9).
 
 ## Contributing
 
