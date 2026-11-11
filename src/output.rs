@@ -20,11 +20,28 @@ use crate::errors::TptError;
 use crate::logger::{self, LogLevel};
 
 /// Builds the JSON envelope for a successful result.
+///
+/// ```
+/// use tpt::output::success_envelope;
+///
+/// let envelope = success_envelope(&serde_json::json!({ "status": 200 })).unwrap();
+/// assert_eq!(envelope["ok"], true);
+/// assert_eq!(envelope["data"]["status"], 200);
+/// ```
 pub fn success_envelope<T: Serialize + ?Sized>(data: &T) -> Result<Value, serde_json::Error> {
     Ok(json!({ "ok": true, "data": serde_json::to_value(data)? }))
 }
 
 /// Builds the JSON envelope for an error.
+///
+/// ```
+/// use tpt::errors::TptError;
+/// use tpt::output::error_envelope;
+///
+/// let envelope = error_envelope(&TptError::Usage("missing URL".into()));
+/// assert_eq!(envelope["ok"], false);
+/// assert_eq!(envelope["error"]["code"], "usage");
+/// ```
 pub fn error_envelope(err: &TptError) -> Value {
     json!({
         "ok": false,
@@ -53,16 +70,40 @@ impl Output {
     }
 
     /// The output mode in use.
+    ///
+    /// ```
+    /// use tpt::config::OutputMode;
+    /// use tpt::output::Output;
+    ///
+    /// assert_eq!(Output::new(OutputMode::Json).mode(), OutputMode::Json);
+    /// ```
     pub fn mode(&self) -> OutputMode {
         self.mode
     }
 
     /// `true` in JSON mode.
+    ///
+    /// ```
+    /// use tpt::config::OutputMode;
+    /// use tpt::output::Output;
+    ///
+    /// assert!(!Output::new(OutputMode::Human).is_json());
+    /// assert!(Output::new(OutputMode::Json).is_json());
+    /// ```
     pub fn is_json(&self) -> bool {
         self.mode == OutputMode::Json
     }
 
     /// Whether this writer colours its own messages.
+    ///
+    /// Colours are never used in JSON mode.
+    ///
+    /// ```
+    /// use tpt::config::OutputMode;
+    /// use tpt::output::Output;
+    ///
+    /// assert!(!Output::new(OutputMode::Json).colors_enabled());
+    /// ```
     pub fn colors_enabled(&self) -> bool {
         self.color
     }
@@ -80,6 +121,14 @@ impl Output {
     }
 
     /// Prints a short success line to stderr in human mode. Nothing is printed in JSON mode.
+    ///
+    /// ```
+    /// use tpt::config::OutputMode;
+    /// use tpt::output::Output;
+    ///
+    /// // JSON mode prints nothing for this call, so the doctest output stays empty.
+    /// Output::new(OutputMode::Json).success("saved");
+    /// ```
     pub fn success(&self, message: &str) {
         if self.is_json() {
             return;

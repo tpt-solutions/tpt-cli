@@ -29,6 +29,7 @@ pub const DEFAULT_APP_NAME: &str = "tpt";
 /// How results are printed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum OutputMode {
     /// Human-readable text.
     #[default]
@@ -39,6 +40,12 @@ pub enum OutputMode {
 
 impl OutputMode {
     /// The lowercase name used in config files and on the command line.
+    ///
+    /// ```
+    /// use tpt::config::OutputMode;
+    ///
+    /// assert_eq!(OutputMode::Json.as_str(), "json");
+    /// ```
     pub fn as_str(self) -> &'static str {
         match self {
             OutputMode::Human => "human",
@@ -78,6 +85,14 @@ pub struct CliOverrides {
 
 impl CliOverrides {
     /// Converts the overrides into a table that [`ConfigLoader::cli_overrides`] accepts.
+    ///
+    /// ```
+    /// use tpt::config::{CliOverrides, OutputMode};
+    ///
+    /// let table = CliOverrides { output: Some(OutputMode::Json), ..Default::default() }.into_table();
+    /// assert_eq!(table["output"].as_str(), Some("json"));
+    /// assert!(!table.contains_key("timeout_secs"));
+    /// ```
     pub fn into_table(self) -> Table {
         let mut table = Table::new();
         if let Some(output) = self.output {
@@ -97,6 +112,26 @@ impl CliOverrides {
 ///
 /// Any application can use it. Pick an app name and the env prefix follows
 /// from it (`"acme"` gives `ACME_` and `~/.config/acme/config.toml`).
+///
+/// ```
+/// use serde::{Deserialize, Serialize};
+/// use tpt::config::ConfigLoader;
+///
+/// #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+/// struct Settings {
+///     timeout_secs: i64,
+///     verbose: bool,
+/// }
+///
+/// let settings: Settings = ConfigLoader::new("acme")
+///     .global_file(None)
+///     .local_file(None)
+///     .env_vars([("ACME_TIMEOUT_SECS", "30"), ("ACME_VERBOSE", "true")])
+///     .load()
+///     .unwrap();
+///
+/// assert_eq!(settings, Settings { timeout_secs: 30, verbose: true });
+/// ```
 #[derive(Debug, Clone)]
 pub struct ConfigLoader {
     env_prefix: String,
@@ -120,24 +155,76 @@ impl ConfigLoader {
     }
 
     /// Overrides the environment variable prefix, for example `"ACME_"`.
+    ///
+    /// ```
+    /// use serde::{Deserialize, Serialize};
+    /// use tpt::config::ConfigLoader;
+    ///
+    /// #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+    /// struct Settings { timeout_secs: i64 }
+    ///
+    /// let settings: Settings = ConfigLoader::new("acme")
+    ///     .global_file(None)
+    ///     .local_file(None)
+    ///     .env_prefix("MYAPP_")
+    ///     .env_vars([("MYAPP_TIMEOUT_SECS", "7"), ("ACME_TIMEOUT_SECS", "99")])
+    ///     .load()
+    ///     .unwrap();
+    ///
+    /// assert_eq!(settings.timeout_secs, 7);
+    /// ```
     pub fn env_prefix(mut self, prefix: &str) -> Self {
         self.env_prefix = prefix.to_owned();
         self
     }
 
     /// Overrides the global file path. `None` disables the global layer.
+    ///
+    /// ```
+    /// use std::path::PathBuf;
+    /// use tpt::config::ConfigLoader;
+    ///
+    /// let loader = ConfigLoader::new("acme").global_file(Some(PathBuf::from("/etc/acme.toml")));
+    /// let _ = loader;
+    /// ```
     pub fn global_file(mut self, path: Option<PathBuf>) -> Self {
         self.global_file = path;
         self
     }
 
     /// Overrides the local file path. `None` disables the local layer.
+    ///
+    /// ```
+    /// use tpt::config::ConfigLoader;
+    ///
+    /// let loader = ConfigLoader::new("acme").local_file(None);
+    /// let _ = loader;
+    /// ```
     pub fn local_file(mut self, path: Option<PathBuf>) -> Self {
         self.local_file = path;
         self
     }
 
     /// Replaces the environment used for the env layer (the process environment by default).
+    ///
+    /// Only variables that start with the env prefix are used.
+    ///
+    /// ```
+    /// use serde::{Deserialize, Serialize};
+    /// use tpt::config::ConfigLoader;
+    ///
+    /// #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+    /// struct Settings { timeout_secs: i64 }
+    ///
+    /// let settings: Settings = ConfigLoader::new("acme")
+    ///     .global_file(None)
+    ///     .local_file(None)
+    ///     .env_vars([("ACME_TIMEOUT_SECS", "12")])
+    ///     .load()
+    ///     .unwrap();
+    ///
+    /// assert_eq!(settings.timeout_secs, 12);
+    /// ```
     pub fn env_vars<I, K, V>(mut self, vars: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -149,6 +236,28 @@ impl ConfigLoader {
     }
 
     /// Sets the CLI layer. See [`CliOverrides::into_table`].
+    ///
+    /// The CLI layer has the highest priority, so it beats the environment.
+    ///
+    /// ```
+    /// use serde::{Deserialize, Serialize};
+    /// use tpt::config::ConfigLoader;
+    /// use toml::Table;
+    ///
+    /// #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
+    /// struct Settings { timeout_secs: i64 }
+    ///
+    /// let cli: Table = "timeout_secs = 5".parse().unwrap();
+    /// let settings: Settings = ConfigLoader::new("acme")
+    ///     .global_file(None)
+    ///     .local_file(None)
+    ///     .env_vars([("ACME_TIMEOUT_SECS", "12")])
+    ///     .cli_overrides(cli)
+    ///     .load()
+    ///     .unwrap();
+    ///
+    /// assert_eq!(settings.timeout_secs, 5);
+    /// ```
     pub fn cli_overrides(mut self, overrides: Table) -> Self {
         self.cli = overrides;
         self
@@ -246,6 +355,18 @@ fn parse_env_value(raw: &str) -> Value {
 }
 
 /// Deep-merges `overlay` into `base`. Overlay values win. Tables merge key by key.
+///
+/// ```
+/// use tpt::config::merge;
+/// use toml::Table;
+///
+/// let mut base: Table = "[net]\ntimeout_secs = 10\nretries = 2".parse().unwrap();
+/// let overlay: Table = "[net]\ntimeout_secs = 30".parse().unwrap();
+/// merge(&mut base, overlay);
+///
+/// assert_eq!(base["net"]["timeout_secs"].as_integer(), Some(30));
+/// assert_eq!(base["net"]["retries"].as_integer(), Some(2));
+/// ```
 pub fn merge(base: &mut Table, overlay: Table) {
     for (key, value) in overlay {
         match value {
