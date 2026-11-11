@@ -1,4 +1,4 @@
-//! Snapshot and drift tests for `tpt schema`.
+//! Snapshot and drift tests for `tptcli schema`.
 //!
 //! To accept an intentional change to the schema, run:
 //! `UPDATE_SNAPSHOTS=1 cargo test --test schema`

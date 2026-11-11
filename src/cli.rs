@@ -1,5 +1,5 @@
 //! The `tpt` command-line definition. It lives in the library so that
-//! `tpt schema` and tests can inspect it.
+//! `tptcli schema` and tests can inspect it.
 
 use clap::{Args, Parser, Subcommand};
 
@@ -8,7 +8,7 @@ use crate::logger::LogLevel;
 
 /// Root command, with global flags shared by every subcommand.
 #[derive(Debug, Parser)]
-#[command(name = "tpt", about = "TPT command-line tools", arg_required_else_help = true)]
+#[command(name = "tptcli", about = "TPT command-line tools", arg_required_else_help = true)]
 pub struct Cli {
     /// Output format. `json` prints a strict JSON envelope to stdout and disables prompts.
     #[arg(long, global = true, value_enum, env = "TPT_OUTPUT", value_name = "FORMAT")]
@@ -45,7 +45,7 @@ pub enum Commands {
     Schema(SchemaArgs),
 }
 
-/// Arguments for `tpt ping`.
+/// Arguments for `tptcli ping`.
 #[derive(Debug, Args)]
 pub struct PingArgs {
     /// The http or https URL to request.
@@ -56,7 +56,7 @@ pub struct PingArgs {
     pub timeout: Option<u64>,
 }
 
-/// Arguments for `tpt schema`.
+/// Arguments for `tptcli schema`.
 #[derive(Debug, Args)]
 pub struct SchemaArgs {
     /// Describe only this top-level command, such as `ping`.

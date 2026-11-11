@@ -85,7 +85,7 @@ fn run(cli: &Cli, mode: &mut OutputMode) -> anyhow::Result<()> {
                 None => schema::command_tree(&root),
                 Some(name) => schema::command_schema(&root, name).ok_or_else(|| {
                     TptError::Usage(format!(
-                        "unknown command `{name}`. Run `tpt schema` to list every command."
+                        "unknown command `{name}`. Run `tptcli schema` to list every command."
                     ))
                 })?,
             };

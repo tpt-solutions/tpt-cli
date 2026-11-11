@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-const BIN: &str = env!("CARGO_BIN_EXE_tpt");
+const BIN: &str = env!("CARGO_BIN_EXE_tptcli");
 
 /// Serves `responses` in order, one per connection, on a random local port.
 /// Returns the base URL.
