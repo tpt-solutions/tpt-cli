@@ -1,0 +1,48 @@
+[package]
+name = "tpt-cli"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+authors = ["TPT Solutions"]
+description = "Permissively licensed framework and `tpt` binary for building agent-friendly command-line interfaces."
+repository = "https://github.com/TPT-Solutions/tpt-cli"
+readme = "README.md"
+keywords = ["cli", "config", "json", "agents"]
+categories = ["command-line-interface", "command-line-utilities"]
+
+[lib]
+name = "tpt"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tpt"
+path = "src/main.rs"
+required-features = ["net"]
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", default-features = false, features = ["derive", "env", "help", "std"] }
+console = "0.16.6"
+dialoguer = { version = "0.12.0", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"], optional = true }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", default-features = false, features = ["rt"], optional = true }
+toml = "1.2.1"
+
+[features]
+default = ["net", "prompts"]
+# HTTP client (reqwest + rustls with ring). The only feature that pulls in ring.
+net = ["dep:reqwest", "dep:tokio"]
+# Interactive prompts via dialoguer.
+prompts = ["dep:dialoguer"]
+
+[profile.release]
+# Size-first release profile. Benchmark opt-level = 3 against "z" before changing it.
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

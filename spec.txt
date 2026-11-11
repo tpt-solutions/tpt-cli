@@ -1,0 +1,74 @@
+Design Specification: tpt-cli
+1. Executive Summary
+tpt-cli is a hyper-optimized, strictly permissively-licensed (MIT/Apache-2.0) Rust framework and binary for building modern command-line interfaces. It is designed specifically to unify the user experience across the TPT open-source ecosystem, providing a lightweight, fast-compiling, and agentic-ready foundation for CLI development.
+2. Core Philosophy & Constraints
+Zero Bloat: Compile times and binary sizes are treated as primary metrics. Unused features are aggressively gated or excluded.
+Strict Licensing: Every direct and transitive dependency must be MIT, Apache-2.0, or dual-licensed. No copyleft (GPL/MPL).
+Solo-Maintainer Friendly: The architecture must minimize boilerplate, avoid complex macro-magic where possible, and keep the cognitive load low.
+Agentic-Native: CLIs must be easily consumable by both humans and machines (LLM agents).
+3. Architecture & Tech Stack
+The stack is ruthlessly optimized for performance and compile speed:
+Component
+Crate(s)
+Purpose & Optimization
+Argument Parsing
+clap
+Parses CLI flags. Optimization: default-features = false, only derive, env, help.
+Configuration
+toml, serde, dirs
+Merges CLI args, Env Vars, and ~/.config/tpt/config.toml.
+Interactive UI
+dialoguer, console
+Native terminal prompts (selects, confirms). No heavy TUI/ratatui unless strictly needed.
+Async Engine
+tokio
+Non-blocking I/O. Optimization: Single-threaded rt only. No multi-thread runtime.
+Networking
+reqwest
+HTTP client. Optimization: rustls-tls only (no C-dependencies/OpenSSL).
+Error Handling
+thiserror, anyhow
+Typed errors for libraries, ergonomic errors for the binary.
+Serialization
+serde_json
+Machine-readable JSON output for agents/automation.
+4. Key Features
+4.1. Unified Configuration Resolution
+tpt-cli will automatically resolve configuration in a strict priority order:
+CLI Arguments (Highest priority)
+Environment Variables (e.g., TPT_LOG_LEVEL=debug)
+Local Config (.tpt.toml in the current directory)
+Global Config (~/.config/tpt/config.toml)
+4.2. Agentic / Machine Mode
+Every command built with tpt-cli will support a global --output json flag. When triggered, the CLI bypasses all human-readable formatting (colors, spinners, prompts) and outputs strict, predictable JSON to stdout, while logging human-readable info to stderr.
+4.3. Standardized Error Diagnostics
+Using thiserror and anyhow, all errors will be formatted consistently. If a network request fails or a config file is malformed, the user gets a clean, actionable error message with a specific exit code, rather than a raw Rust panic.
+5. Repository Structure
+To keep it simple for a solo maintainer, tpt-cli will be a single Rust crate that acts as both a library (for your other projects to consume) and a binary (the actual tpt command).
+
+tpt-cli/
+├── Cargo.toml             # Strictly MIT/Apache dependencies
+├── LICENSE-MIT
+├── LICENSE-APACHE
+├── README.md
+├── src/
+│   ├── main.rs            # The binary entrypoint (the actual `tpt` CLI)
+│   ├── lib.rs             # Exports the framework for other TPT repos to use
+│   ├── config.rs          # Unified config loading (dirs + toml + clap env)
+│   ├── errors.rs          # Standardized thiserror/anyhow definitions
+│   ├── output.rs          # Human vs. Machine (JSON) output formatting
+│   └── prompts.rs         # Wrapper around dialoguer for consistent UX
+└── examples/
+    └── basic_cmd.rs       # Example of how another TPT repo would use the lib
+
+6. Development Roadmap (Phase 1)
+Milestone 1: The Skeleton (Days 1-2)
+Initialize the workspace with the optimized Cargo.toml.
+Implement config.rs to prove that CLI args, Env vars, and TOML files merge correctly.
+Implement errors.rs to establish the baseline error handling.
+Milestone 2: The UX & Output (Days 3-4)
+Implement output.rs to handle the --output json flag.
+Implement prompts.rs using dialoguer to create a standardized "Confirm Action" prompt.
+Build a basic main.rs that ties it all together (e.g., a tpt-cli ping command).
+Milestone 3: The Agentic Polish (Day 5)
+Add a tpt-cli schema command that uses clap's internal structures to output a JSON schema of all available commands, allowing AI agents to discover the CLI's capabilities dynamically.

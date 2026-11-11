@@ -1,0 +1,83 @@
+# cargo-deny configuration for tpt-cli.
+#
+# Licence policy (see README, "Licensing"):
+#   * Allow permissive licences: MIT, ISC, BSD-2/3, Zlib, Unicode-3.0, CC0-1.0, Unlicense.
+#   * Apache-2.0 is allowed only as one option of an OR expression (for example
+#     "MIT OR Apache-2.0"). It is NOT allowed on its own, and not in AND expressions.
+#   * Deny copyleft (GPL, LGPL, AGPL), MPL and CDLA.
+#   * Each exception below is documented and must be justified.
+
+[graph]
+# Check the dependency tree for every target platform.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = false
+no-default-features = false
+
+[licenses]
+version = 2
+confidence-threshold = 0.93
+# Only permissive licences from the allowlist. Apache-2.0 is deliberately absent.
+# A dual "X OR Apache-2.0" licence is satisfied by X, so it passes without Apache-2.0 here.
+allow = [
+    "MIT",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "Unlicense",
+]
+
+# Exceptions, each one a single crate. Keep this list short.
+#
+# ring 0.17 is licensed "Apache-2.0 AND ISC". It is the one allowed AND-Apache
+# dependency, and it is pulled in ONLY by the `net` feature (reqwest + rustls).
+# The default core library build (`--no-default-features`) does not contain ring.
+# Phase 9 of todo.md replaces it.
+[[licenses.exceptions]]
+crate = "ring"
+allow = ["Apache-2.0"]
+
+# ryu is "Apache-2.0 OR BSL-1.0". It is a dual licence, so we take its Apache-2.0 alternative.
+# The Apache-2.0 option is used only because it is an OR alternative, which the policy allows.
+[[licenses.exceptions]]
+crate = "ryu"
+allow = ["Apache-2.0"]
+
+# sync_wrapper 1.x is Apache-2.0 ONLY. It is an unavoidable dependency of reqwest 0.12
+# (used in the `net` feature). This is an Apache-only exception, which the policy
+# normally forbids. It needs the maintainer's explicit sign-off, and it should be
+# removed when reqwest no longer depends on sync_wrapper (tracked in todo.md, Phase 9).
+[[licenses.exceptions]]
+crate = "sync_wrapper"
+allow = ["Apache-2.0"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+# Block C and OpenSSL-based crypto, so the tree stays free of C dependencies.
+deny = [
+    { name = "openssl-sys", reason = "No C dependencies: rustls only." },
+    { name = "openssl", reason = "No C dependencies: rustls only." },
+    { name = "aws-lc-sys", reason = "Use ring (see the net feature) so there are no C crypto dependencies." },
+    { name = "aws-lc-rs", reason = "Use ring (see the net feature) so there are no C crypto dependencies." },
+]
+skip = []
+skip-tree = []
+
+[advisories]
+version = 2
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

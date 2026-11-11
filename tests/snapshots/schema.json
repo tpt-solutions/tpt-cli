@@ -1,0 +1,242 @@
+{
+  "about": "TPT command-line tools",
+  "args": [
+    {
+      "default": [],
+      "env": "TPT_OUTPUT",
+      "global": true,
+      "help": "Output format. `json` prints a strict JSON envelope to stdout and disables prompts",
+      "id": "output",
+      "long": "output",
+      "multiple": false,
+      "positional": false,
+      "required": false,
+      "short": null,
+      "type": "enum",
+      "values": [
+        "human",
+        "json"
+      ]
+    },
+    {
+      "default": [],
+      "env": "TPT_LOG_LEVEL",
+      "global": true,
+      "help": "Maximum log level on stderr",
+      "id": "log_level",
+      "long": "log-level",
+      "multiple": false,
+      "positional": false,
+      "required": false,
+      "short": null,
+      "type": "enum",
+      "values": [
+        "error",
+        "warn",
+        "info",
+        "debug",
+        "trace"
+      ]
+    },
+    {
+      "default": [
+        "false"
+      ],
+      "env": null,
+      "global": true,
+      "help": "Shorthand for `--log-level debug`",
+      "id": "verbose",
+      "long": "verbose",
+      "multiple": false,
+      "positional": false,
+      "required": false,
+      "short": "v",
+      "type": "bool",
+      "values": null
+    },
+    {
+      "default": [
+        "false"
+      ],
+      "env": null,
+      "global": true,
+      "help": "Shorthand for `--log-level error`",
+      "id": "quiet",
+      "long": "quiet",
+      "multiple": false,
+      "positional": false,
+      "required": false,
+      "short": "q",
+      "type": "bool",
+      "values": null
+    },
+    {
+      "default": [
+        "false"
+      ],
+      "env": null,
+      "global": true,
+      "help": "Answer yes to confirmation prompts",
+      "id": "yes",
+      "long": "yes",
+      "multiple": false,
+      "positional": false,
+      "required": false,
+      "short": "y",
+      "type": "bool",
+      "values": null
+    }
+  ],
+  "exit_codes": [
+    {
+      "code": 0,
+      "meaning": "The command succeeded.",
+      "name": "success"
+    },
+    {
+      "code": 1,
+      "meaning": "An unexpected internal error (please report it).",
+      "name": "internal"
+    },
+    {
+      "code": 2,
+      "meaning": "Invalid command-line usage.",
+      "name": "usage"
+    },
+    {
+      "code": 3,
+      "meaning": "A configuration file or value is invalid.",
+      "name": "config"
+    },
+    {
+      "code": 4,
+      "meaning": "The host name could not be resolved.",
+      "name": "dns"
+    },
+    {
+      "code": 5,
+      "meaning": "The TLS handshake or certificate check failed.",
+      "name": "tls"
+    },
+    {
+      "code": 6,
+      "meaning": "The connection was refused, reset or unreachable.",
+      "name": "connection"
+    },
+    {
+      "code": 7,
+      "meaning": "The request timed out.",
+      "name": "timeout"
+    },
+    {
+      "code": 8,
+      "meaning": "A local file or I/O operation failed.",
+      "name": "io"
+    },
+    {
+      "code": 130,
+      "meaning": "The user aborted the operation.",
+      "name": "aborted"
+    }
+  ],
+  "name": "tpt",
+  "output": {
+    "error": {
+      "error": {
+        "code": "string",
+        "hint": "string or null",
+        "message": "string"
+      },
+      "ok": false
+    },
+    "notes": "In json mode, stdout holds only the envelope. Logs go to stderr.",
+    "success": {
+      "data": "command-specific object",
+      "ok": true
+    }
+  },
+  "schema_version": 1,
+  "subcommands": [
+    {
+      "about": "Send an HTTP GET request and report the status and latency",
+      "args": [
+        {
+          "default": [],
+          "env": null,
+          "global": false,
+          "help": "The http or https URL to request",
+          "id": "url",
+          "long": null,
+          "multiple": false,
+          "positional": true,
+          "required": true,
+          "short": null,
+          "type": "string",
+          "values": null
+        },
+        {
+          "default": [],
+          "env": null,
+          "global": false,
+          "help": "Request timeout in seconds. Overrides the configured value",
+          "id": "timeout",
+          "long": "timeout",
+          "multiple": false,
+          "positional": false,
+          "required": false,
+          "short": null,
+          "type": "string",
+          "values": null
+        }
+      ],
+      "name": "ping",
+      "subcommands": []
+    },
+    {
+      "about": "Print the command tree as JSON, for agents and tooling",
+      "args": [
+        {
+          "default": [],
+          "env": null,
+          "global": false,
+          "help": "Describe only this top-level command, such as `ping`",
+          "id": "command",
+          "long": null,
+          "multiple": false,
+          "positional": true,
+          "required": false,
+          "short": null,
+          "type": "string",
+          "values": null
+        }
+      ],
+      "name": "schema",
+      "subcommands": []
+    },
+    {
+      "about": "Print this message or the help of the given subcommand(s)",
+      "args": [],
+      "name": "help",
+      "subcommands": [
+        {
+          "about": "Send an HTTP GET request and report the status and latency",
+          "args": [],
+          "name": "ping",
+          "subcommands": []
+        },
+        {
+          "about": "Print the command tree as JSON, for agents and tooling",
+          "args": [],
+          "name": "schema",
+          "subcommands": []
+        },
+        {
+          "about": "Print this message or the help of the given subcommand(s)",
+          "args": [],
+          "name": "help",
+          "subcommands": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+# Formatting for tpt-cli. Stable options only, so `cargo fmt` works on the stable toolchain.
+edition = "2024"
+max_width = 110
+use_small_heuristics = "Max"
