@@ -38,6 +38,7 @@ jobs:
       - run: cargo test --all-targets
       - run: cargo test --no-default-features --lib
       - run: cargo build --no-default-features --examples
+      - run: cargo run --no-default-features --example basic_cmd -- greet Ada
 
   deny:
     name: cargo deny
