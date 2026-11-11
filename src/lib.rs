@@ -13,6 +13,26 @@
 //!
 //! Building with `default-features = false` leaves out the networking and
 //! prompt dependencies, and with them `ring`.
+//!
+//! # Example
+//!
+//! Resolve configuration from defaults and environment variables. The global
+//! and local files are disabled here so the example does not depend on the
+//! machine it runs on.
+//!
+//! ```
+//! use tpt::prelude::*;
+//!
+//! let config: TptConfig = ConfigLoader::new("acme")
+//!     .global_file(None)
+//!     .local_file(None)
+//!     .env_vars([("ACME_TIMEOUT_SECS", "30")])
+//!     .load()
+//!     .expect("defaults always load");
+//!
+//! assert_eq!(config.timeout_secs, 30);
+//! assert_eq!(config.output, OutputMode::Human);
+//! ```
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

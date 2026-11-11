@@ -22,6 +22,17 @@ use crate::errors::EXIT_CODES;
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Returns the full schema for `root` and every subcommand beneath it.
+///
+/// ```
+/// use clap::Command;
+/// use tpt::schema::{command_tree, SCHEMA_VERSION};
+///
+/// let root = Command::new("acme").subcommand(Command::new("ping"));
+/// let schema = command_tree(&root);
+///
+/// assert_eq!(schema["schema_version"], SCHEMA_VERSION);
+/// assert_eq!(schema["subcommands"][0]["name"], "ping");
+/// ```
 pub fn command_tree(root: &Command) -> Value {
     let root = built(root);
     let mut node = node(&root, true);
@@ -32,6 +43,15 @@ pub fn command_tree(root: &Command) -> Value {
 }
 
 /// Returns the schema for one top-level subcommand of `root`, or `None` if it does not exist.
+///
+/// ```
+/// use clap::Command;
+/// use tpt::schema::command_schema;
+///
+/// let root = Command::new("acme").subcommand(Command::new("ping"));
+/// assert!(command_schema(&root, "ping").is_some());
+/// assert!(command_schema(&root, "nope").is_none());
+/// ```
 pub fn command_schema(root: &Command, name: &str) -> Option<Value> {
     let root = built(root);
     let sub = root

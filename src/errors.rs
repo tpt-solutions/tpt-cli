@@ -40,7 +40,7 @@ pub struct ExitCodeInfo {
     pub meaning: &'static str,
 }
 
-/// The exit-code table, as documented in the README and emitted by `tpt schema`.
+/// The exit-code table, as documented in the README and emitted by `tptcli schema`.
 pub const EXIT_CODES: &[ExitCodeInfo] = &[
     ExitCodeInfo { code: EXIT_SUCCESS, name: "success", meaning: "The command succeeded." },
     ExitCodeInfo {
@@ -64,6 +64,7 @@ pub const EXIT_CODES: &[ExitCodeInfo] = &[
 
 /// The category of a network failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NetworkKind {
     /// DNS resolution failed.
     Dns,
@@ -77,6 +78,7 @@ pub enum NetworkKind {
 
 /// A configuration problem, optionally located in a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConfigError {
     /// The file the problem was found in, if any.
     pub path: Option<PathBuf>,
@@ -105,6 +107,7 @@ impl std::error::Error for ConfigError {}
 
 /// Every error the framework reports.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TptError {
     /// Invalid command-line usage or arguments.
     #[error("{0}")]
@@ -160,6 +163,14 @@ impl TptError {
     }
 
     /// The process exit code for this error (see [`EXIT_CODES`]).
+    ///
+    /// ```
+    /// use tpt::errors::{EXIT_USAGE, TptError};
+    ///
+    /// let err = TptError::Usage("missing URL".into());
+    /// assert_eq!(err.code(), "usage");
+    /// assert_eq!(err.exit_code(), EXIT_USAGE);
+    /// ```
     pub fn exit_code(&self) -> u8 {
         match self {
             TptError::Usage(_) => EXIT_USAGE,
@@ -177,6 +188,13 @@ impl TptError {
     }
 
     /// An actionable next step, if there is a useful one.
+    ///
+    /// ```
+    /// use tpt::errors::TptError;
+    ///
+    /// let err = TptError::Timeout { url: "https://example.test".into(), timeout_secs: 5 };
+    /// assert!(err.hint().unwrap().contains("--timeout"));
+    /// ```
     pub fn hint(&self) -> Option<&'static str> {
         match self {
             TptError::Usage(_) => Some("Run the command with --help to see valid usage."),
@@ -203,6 +221,14 @@ impl TptError {
 }
 
 /// Joins an error and its sources into one line, for example `a: b: c`.
+///
+/// ```
+/// use std::io;
+/// use tpt::errors::error_chain;
+///
+/// let err = io::Error::other("disk full");
+/// assert_eq!(error_chain(&err), "disk full");
+/// ```
 pub fn error_chain(err: &dyn std::error::Error) -> String {
     let mut parts = vec![err.to_string()];
     let mut source = err.source();

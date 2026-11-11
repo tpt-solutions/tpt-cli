@@ -18,6 +18,17 @@ use crate::output::Output;
 /// * Ctrl-C returns [`TptError::Aborted`].
 ///
 /// Returns `Ok(false)` if the user answers no.
+///
+/// With `assume_yes` set, the prompt is skipped and the answer is `Ok(true)`.
+///
+/// ```
+/// use tpt::config::OutputMode;
+/// use tpt::output::Output;
+/// use tpt::prompts::confirm_action;
+///
+/// let output = Output::new(OutputMode::Json);
+/// assert!(confirm_action(&output, "Delete?", true).unwrap());
+/// ```
 pub fn confirm_action(output: &Output, prompt: &str, assume_yes: bool) -> Result<bool, TptError> {
     if assume_yes {
         return Ok(true);
