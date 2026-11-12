@@ -62,6 +62,11 @@ pub const EXIT_CODES: &[ExitCodeInfo] = &[
     ExitCodeInfo { code: EXIT_ABORTED, name: "aborted", meaning: "The user aborted the operation." },
 ];
 
+/// Every stable error `code` that [`TptError::code`] can return. The JSON envelope and
+/// `tptcli schema` both use this list.
+pub const ERROR_CODES: &[&str] =
+    &["usage", "config", "dns", "tls", "connection", "timeout", "io", "aborted", "internal"];
+
 /// The category of a network failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -300,5 +305,24 @@ mod tests {
             message: "expected a value".into(),
         };
         assert_eq!(err.to_string(), "a.toml:3:7: expected a value");
+    }
+
+    #[test]
+    fn error_code_list_matches_every_variant() {
+        let samples = [
+            TptError::Usage("x".into()),
+            TptError::Config(ConfigError { path: None, line: None, column: None, message: "x".into() }),
+            TptError::Network { url: "u".into(), kind: NetworkKind::Dns, reason: "r".into() },
+            TptError::Network { url: "u".into(), kind: NetworkKind::Tls, reason: "r".into() },
+            TptError::Network { url: "u".into(), kind: NetworkKind::Connect, reason: "r".into() },
+            TptError::Timeout { url: "u".into(), timeout_secs: 1 },
+            TptError::Io(std::io::Error::other("x")),
+            TptError::Aborted,
+            TptError::Internal("x".into()),
+        ];
+        for err in samples {
+            assert!(ERROR_CODES.contains(&err.code()), "{} missing from ERROR_CODES", err.code());
+        }
+        assert_eq!(ERROR_CODES.len(), 9);
     }
 }

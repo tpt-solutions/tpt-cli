@@ -131,6 +131,14 @@ pub struct PingArgs {
     #[arg(long, value_name = "SECS")]
     pub timeout: Option<u64>,
 
+    /// Number of pings to send. Above 1, every result is printed, and the exit code is non-zero if any ping failed.
+    #[arg(short = 'c', long, value_name = "N", default_value_t = 1)]
+    pub count: u32,
+
+    /// Seconds to wait between pings when --count is above 1.
+    #[arg(long, value_name = "SECS", default_value_t = 1)]
+    pub interval: u64,
+
     /// Retry a refused or reset connection, or a timeout, this many times. Waits 200 ms, 400 ms, ... between tries.
     #[arg(long, value_name = "N", default_value_t = 0)]
     pub retries: u32,

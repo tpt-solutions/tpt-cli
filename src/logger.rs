@@ -159,3 +159,25 @@ pub fn debug(message: &str) {
 pub fn trace(message: &str) {
     log(LogLevel::Trace, message);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LogLevel;
+
+    // The level is a process-wide setting, so these tests check only pure behaviour.
+
+    #[test]
+    fn names_are_lowercase_and_ordered_from_error_to_trace() {
+        let levels = [LogLevel::Error, LogLevel::Warn, LogLevel::Info, LogLevel::Debug, LogLevel::Trace];
+        let names: Vec<&str> = levels.iter().map(|l| l.as_str()).collect();
+        assert_eq!(names, ["error", "warn", "info", "debug", "trace"]);
+        assert!(levels.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn stored_level_round_trips_through_its_discriminant() {
+        for level in [LogLevel::Error, LogLevel::Warn, LogLevel::Info, LogLevel::Debug, LogLevel::Trace] {
+            assert_eq!(LogLevel::from_u8(level as u8), level);
+        }
+    }
+}

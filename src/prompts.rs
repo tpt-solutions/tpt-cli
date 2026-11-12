@@ -54,3 +54,33 @@ pub fn confirm_action(output: &Output, prompt: &str, assume_yes: bool) -> Result
 pub fn theme() -> ColorfulTheme {
     ColorfulTheme::default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::OutputMode;
+
+    #[test]
+    fn assume_yes_skips_the_prompt() {
+        let output = Output::new(OutputMode::Human);
+        assert!(confirm_action(&output, "Delete?", true).unwrap());
+    }
+
+    #[test]
+    fn json_mode_never_prompts() {
+        let output = Output::new(OutputMode::Json);
+        let err = confirm_action(&output, "Delete?", false).unwrap_err();
+        assert!(matches!(err, TptError::Usage(ref m) if m.contains("--yes")), "{err:?}");
+    }
+
+    #[test]
+    fn no_terminal_never_prompts() {
+        // A developer running the tests in a terminal would otherwise get a live prompt.
+        if io::stdin().is_terminal() && io::stderr().is_terminal() {
+            return;
+        }
+        let output = Output::new(OutputMode::Human);
+        let err = confirm_action(&output, "Delete?", false).unwrap_err();
+        assert!(matches!(err, TptError::Usage(ref m) if m.contains("no terminal")), "{err:?}");
+    }
+}

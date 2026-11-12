@@ -47,6 +47,8 @@ pub mod net;
 pub mod output;
 #[cfg(feature = "prompts")]
 pub mod prompts;
+#[cfg(feature = "net")]
+pub mod proxy;
 pub mod schema;
 
 /// Commonly used items, for `use tpt::prelude::*;`.

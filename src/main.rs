@@ -2,22 +2,24 @@
 //! config, run, and report errors with the right exit code.
 
 use std::ffi::OsString;
+use std::fmt;
 use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{CommandFactory, Parser};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use tpt::admin::{self, LOCAL_CONFIG_FILE};
-use tpt::cli::{Cli, Commands, ConfigCommand, ManArgs, SchemaFormat};
+use tpt::cli::{Cli, Commands, ConfigCommand, ManArgs, PingArgs, SchemaFormat};
 use tpt::config::{CliOverrides, ConfigLoader, DEFAULT_APP_NAME, OutputMode, TptConfig, global_config_path};
-use tpt::errors::{ConfigError, EXIT_SUCCESS, EXIT_USAGE, TptError};
+use tpt::errors::{ConfigError, EXIT_INTERNAL, EXIT_SUCCESS, EXIT_USAGE, TptError};
 use tpt::logger::{self, LogLevel};
+use tpt::net::PingReport;
 use tpt::output::Output;
 use tpt::prompts::confirm_action;
-use tpt::{net, schema};
+use tpt::schema;
 
 fn main() -> ExitCode {
     let raw: Vec<OsString> = std::env::args_os().collect();
@@ -41,6 +43,9 @@ fn main() -> ExitCode {
     match run(&cli, &mut mode) {
         Ok(()) => ExitCode::from(EXIT_SUCCESS),
         Err(err) => {
+            if let Some(exit) = err.downcast_ref::<ExitAfterOutput>() {
+                return ExitCode::from(exit.0);
+            }
             let err = match err.downcast::<TptError>() {
                 Ok(tpt_err) => tpt_err,
                 Err(other) => TptError::Internal(format!("{other:#}")),
@@ -96,22 +101,7 @@ fn run(cli: &Cli, mode: &mut OutputMode) -> anyhow::Result<()> {
     tpt::output::set_select(cli.select.as_deref());
 
     match &cli.command {
-        Commands::Ping(args) => {
-            output.progress(&format!("requesting {}", args.url));
-            let options = net::PingOptions {
-                timeout: Duration::from_secs(config.timeout_secs),
-                retries: args.retries,
-                headers: args.headers.clone(),
-            };
-            let result = net::ping_with(&args.url, &options);
-            output.clear_progress();
-            let report = result?;
-            let human = format!(
-                "{} {} {} in {:.2} ms (timeout {}s)",
-                report.url, report.status, report.reason, report.latency_ms, report.timeout_secs
-            );
-            output.data(&human, &report)?;
-        }
+        Commands::Ping(args) => run_ping(args, &output, &config)?,
         Commands::Schema(args) => {
             // Schema output is always JSON, in every mode, and has no envelope.
             let root = Cli::command();
@@ -213,6 +203,87 @@ fn run_config(
         }
     }
     Ok(())
+}
+
+/// Sets the exit code after output was already printed. No error envelope is added.
+#[derive(Debug)]
+struct ExitAfterOutput(u8);
+
+impl fmt::Display for ExitAfterOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "exit {}", self.0)
+    }
+}
+
+impl std::error::Error for ExitAfterOutput {}
+
+/// Runs `ping`, once or `--count` times. With several pings, every result is printed, and the
+/// exit code is non-zero if any ping failed.
+fn run_ping(args: &PingArgs, output: &Output, config: &TptConfig) -> anyhow::Result<()> {
+    let mut options = tpt::net::PingOptions::new(Duration::from_secs(config.timeout_secs));
+    options.retries = args.retries;
+    options.headers = args.headers.clone();
+    let options = options.with_env_proxy()?;
+
+    if args.count <= 1 {
+        output.progress(&format!("requesting {}", args.url));
+        let result = tpt::net::ping_with(&args.url, &options);
+        output.clear_progress();
+        let report = result?;
+        output.data(&ping_line(&report), &report)?;
+        return Ok(());
+    }
+
+    let mut results = Vec::new();
+    for seq in 1..=args.count {
+        if seq > 1 && args.interval > 0 {
+            std::thread::sleep(Duration::from_secs(args.interval));
+        }
+        output.progress(&format!("ping {seq} of {}", args.count));
+        let result = tpt::net::ping_with(&args.url, &options);
+        output.clear_progress();
+        results.push((seq, result));
+    }
+
+    let received = results.iter().filter(|(_, r)| r.is_ok()).count();
+    let lines: Vec<String> = results
+        .iter()
+        .map(|(seq, r)| match r {
+            Ok(report) => format!("#{seq} {}", ping_line(report)),
+            Err(err) => format!("#{seq} error: {err}"),
+        })
+        .collect();
+    let human = format!("{}\n{received} of {} received", lines.join("\n"), args.count);
+    let items: Vec<Value> = results
+        .iter()
+        .map(|(seq, r)| match r {
+            Ok(report) => json!({ "seq": seq, "ok": true, "report": report }),
+            Err(err) => json!({
+                "seq": seq,
+                "ok": false,
+                "error": { "code": err.code(), "message": err.to_string(), "hint": err.hint() }
+            }),
+        })
+        .collect();
+    output.data(
+        &human,
+        &json!({ "url": args.url, "sent": args.count, "received": received, "results": items }),
+    )?;
+
+    if received == results.len() {
+        return Ok(());
+    }
+    let code =
+        results.iter().rev().find_map(|(_, r)| r.as_ref().err()).map_or(EXIT_INTERNAL, |e| e.exit_code());
+    Err(ExitAfterOutput(code).into())
+}
+
+/// The one-line human summary of a successful ping.
+fn ping_line(report: &PingReport) -> String {
+    format!(
+        "{} {} {} in {:.2} ms (timeout {}s)",
+        report.url, report.status, report.reason, report.latency_ms, report.timeout_secs
+    )
 }
 
 /// Writes man pages (or prints the main page when no directory is given).

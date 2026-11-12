@@ -16,6 +16,7 @@ use serde::Serialize;
 use url::Url;
 
 use crate::errors::{NetworkKind, TptError};
+use crate::proxy::ProxySettings;
 
 /// Redirects followed before giving up. This matches the default of common HTTP clients.
 const MAX_REDIRECTS: usize = 10;
@@ -31,12 +32,20 @@ pub struct PingOptions {
     pub retries: u32,
     /// Extra request headers, as `Name: value` lines.
     pub headers: Vec<String>,
+    /// The proxy to use. [`PingOptions::new`] sets none; see [`PingOptions::with_env_proxy`].
+    pub proxy: ProxySettings,
 }
 
 impl PingOptions {
-    /// Options with the given timeout, no retries and no extra headers.
+    /// Options with the given timeout, no retries, no extra headers and no proxy.
     pub fn new(timeout: Duration) -> Self {
-        Self { timeout, retries: 0, headers: Vec::new() }
+        Self { timeout, retries: 0, headers: Vec::new(), proxy: ProxySettings::none() }
+    }
+
+    /// Uses `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` from the environment.
+    pub fn with_env_proxy(mut self) -> Result<Self, TptError> {
+        self.proxy = ProxySettings::from_env()?;
+        Ok(self)
     }
 }
 
@@ -118,7 +127,7 @@ pub fn ping_with(url: &str, options: &PingOptions) -> Result<PingReport, TptErro
         attempt += 1;
         let mut timings = Timings::default();
         let started = Instant::now();
-        match fetch(parsed.clone(), timeout, &headers, &mut timings) {
+        match fetch(parsed.clone(), timeout, &headers, &options.proxy, &mut timings) {
             Ok(reply) => {
                 let latency = started.elapsed();
                 let reason = http::StatusCode::from_u16(reply.status)
@@ -216,6 +225,7 @@ fn fetch(
     start: Url,
     timeout: Duration,
     headers: &[(http::HeaderName, http::HeaderValue)],
+    proxy: &ProxySettings,
     timings: &mut Timings,
 ) -> Result<Reply, Fail> {
     let deadline = Instant::now() + timeout;
@@ -223,7 +233,7 @@ fn fetch(
     let mut current = start;
     let mut hops = 0usize;
     loop {
-        let reply = request_once(&current, deadline, &mut tls, headers, timings)?;
+        let reply = request_once(&current, deadline, &mut tls, headers, proxy, timings)?;
         let Some(location) = reply.location.as_deref().filter(|_| is_redirect(reply.status)) else {
             return Ok(reply);
         };
@@ -251,12 +261,13 @@ fn is_redirect(status: u16) -> bool {
     matches!(status, 301 | 302 | 303 | 307 | 308)
 }
 
-/// Makes one request to `url` without following redirects.
+/// Makes one request to `url` without following redirects. Goes through the proxy, if one applies.
 fn request_once(
     url: &Url,
     deadline: Instant,
     tls: &mut Option<Arc<ClientConfig>>,
     headers: &[(http::HeaderName, http::HeaderValue)],
+    proxy: &ProxySettings,
     timings: &mut Timings,
 ) -> Result<Reply, Fail> {
     let host = url.host_str().ok_or_else(|| Fail::net(NetworkKind::Other, "the URL has no host"))?;
@@ -265,35 +276,75 @@ fn request_once(
     // IPv6 literals come back in brackets. Socket and TLS APIs want them bare.
     let bare_host = host.trim_start_matches('[').trim_end_matches(']');
 
+    // With a proxy, the socket goes to the proxy. The origin host is still used for TLS and Host.
+    let route = proxy.for_url(url).cloned();
+    let (connect_host, connect_port) = match &route {
+        Some(p) => (p.host.clone(), p.port),
+        None => (bare_host.to_owned(), port),
+    };
+
     let step = Instant::now();
-    let addrs = resolve(bare_host, port, deadline)?;
+    let addrs = resolve(&connect_host, connect_port, deadline)?;
     timings.dns_ms += ms_since(step);
 
     let step = Instant::now();
     let mut tcp = connect(&addrs, deadline)?;
     timings.connect_ms += ms_since(step);
-    let request = build_request(url, headers);
+
+    let absolute = route.is_some() && url.scheme() == "http";
+    let request = build_request(url, headers, absolute);
 
     if url.scheme() == "https" {
-        let config = tls_config(tls)?;
-        let name = ServerName::try_from(bare_host.to_owned())
-            .map_err(|e| Fail::net(NetworkKind::Tls, format!("invalid server name `{bare_host}`: {e}")))?;
-        let mut conn =
-            ClientConnection::new(config, name).map_err(|e| Fail::net(NetworkKind::Tls, e.to_string()))?;
-        let step = Instant::now();
-        handshake(&mut conn, &mut tcp, deadline)?;
-        *timings.tls_ms.get_or_insert(0.0) += ms_since(step);
-        let mut stream = StreamOwned::new(conn, tcp);
-        let step = Instant::now();
-        let reply = exchange(&mut stream, deadline, &request)?;
-        timings.ttfb_ms += ms_since(step);
-        Ok(reply)
-    } else {
-        let step = Instant::now();
-        let reply = exchange(&mut tcp, deadline, &request)?;
-        timings.ttfb_ms += ms_since(step);
-        Ok(reply)
+        if route.is_some() {
+            tunnel(&mut tcp, bare_host, port, deadline)?;
+        }
+        return over_tls(tcp, bare_host, &request, deadline, tls, timings);
     }
+    let step = Instant::now();
+    let reply = exchange(&mut tcp, deadline, &request)?;
+    timings.ttfb_ms += ms_since(step);
+    Ok(reply)
+}
+
+/// Runs TLS over `tcp` and sends the request through it.
+fn over_tls(
+    mut tcp: TcpStream,
+    host: &str,
+    request: &[u8],
+    deadline: Instant,
+    tls: &mut Option<Arc<ClientConfig>>,
+    timings: &mut Timings,
+) -> Result<Reply, Fail> {
+    let config = tls_config(tls)?;
+    let name = ServerName::try_from(host.to_owned())
+        .map_err(|e| Fail::net(NetworkKind::Tls, format!("invalid server name `{host}`: {e}")))?;
+    let mut conn =
+        ClientConnection::new(config, name).map_err(|e| Fail::net(NetworkKind::Tls, e.to_string()))?;
+    let step = Instant::now();
+    handshake(&mut conn, &mut tcp, deadline)?;
+    *timings.tls_ms.get_or_insert(0.0) += ms_since(step);
+    let mut stream = StreamOwned::new(conn, tcp);
+    let step = Instant::now();
+    let reply = exchange(&mut stream, deadline, request)?;
+    timings.ttfb_ms += ms_since(step);
+    Ok(reply)
+}
+
+/// Asks the proxy for a tunnel to `host:port` with `CONNECT`. Fails unless the proxy answers 200.
+fn tunnel(tcp: &mut TcpStream, host: &str, port: u16, deadline: Instant) -> Result<(), Fail> {
+    let target = if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") };
+    let request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n");
+    arm(tcp, deadline)?;
+    tcp.write_all(request.as_bytes()).map_err(classify_io)?;
+    let head = read_head(tcp, deadline)?;
+    let reply = parse_reply(&head)?;
+    if reply.status != 200 {
+        return Err(Fail::net(
+            NetworkKind::Connect,
+            format!("the proxy refused the tunnel to {target} (HTTP {})", reply.status),
+        ));
+    }
+    Ok(())
 }
 
 fn ms_since(start: Instant) -> f64 {
@@ -476,19 +527,22 @@ fn parse_reply(raw: &[u8]) -> Result<Reply, Fail> {
 }
 
 /// The request line and headers for a `GET` of `url`, with any extra headers.
-fn build_request(url: &Url, extra: &[(http::HeaderName, http::HeaderValue)]) -> Vec<u8> {
+/// `absolute` puts the full URL on the request line, as a proxy expects.
+fn build_request(url: &Url, extra: &[(http::HeaderName, http::HeaderValue)], absolute: bool) -> Vec<u8> {
     let mut path = url.path().to_owned();
     if let Some(query) = url.query() {
         path.push('?');
         path.push_str(query);
     }
+    // Through a plain-http proxy the request line carries the full URL instead.
+    let target = if absolute { url.as_str().to_owned() } else { path };
     let host = url.host_str().unwrap_or_default();
     let host_header = match url.port() {
         Some(port) => format!("{host}:{port}"),
         None => host.to_owned(),
     };
     let mut request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nUser-Agent: tpt-cli/{}\r\nAccept: */*\r\nConnection: close\r\n",
+        "GET {target} HTTP/1.1\r\nHost: {host_header}\r\nUser-Agent: tpt-cli/{}\r\nAccept: */*\r\nConnection: close\r\n",
         env!("CARGO_PKG_VERSION")
     );
     for (name, value) in extra {
@@ -627,7 +681,7 @@ mod tests {
     fn extra_headers_are_sent_and_reserved_ones_refused() {
         let url = Url::parse("http://example.test/").unwrap();
         let headers = parse_headers(&["X-Trace: abc".to_owned()]).unwrap();
-        let text = String::from_utf8(build_request(&url, &headers)).unwrap();
+        let text = String::from_utf8(build_request(&url, &headers, false)).unwrap();
         // The `http` crate stores header names in lower case. HTTP treats names as case-insensitive.
         assert!(text.contains("\r\nx-trace: abc\r\n"));
         assert!(parse_headers(&["Host: evil.test".to_owned()]).is_err());
@@ -666,10 +720,54 @@ mod tests {
         assert!(report.timings.ttfb_ms >= 0.0);
     }
 
+    /// A one-shot fake proxy. It sends the request head it received over the returned channel,
+    /// then answers with `reply`. Returns the proxy URL.
+    fn fake_proxy(reply: &'static str) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else { return };
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 512];
+            while head_end(&seen).is_none() {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => seen.extend_from_slice(&buf[..n]),
+                }
+            }
+            let _ = tx.send(String::from_utf8_lossy(&seen).into_owned());
+            let _ = stream.write_all(reply.as_bytes());
+        });
+        (format!("http://127.0.0.1:{port}"), rx)
+    }
+
+    #[test]
+    fn plain_http_through_a_proxy_sends_the_absolute_url() {
+        let (proxy, seen) = fake_proxy(OK);
+        let mut options = PingOptions::new(Duration::from_secs(5));
+        options.proxy = crate::proxy::ProxySettings::explicit(Some(proxy.as_str()), None).unwrap();
+        let report = ping_with("http://origin.invalid/path?q=1", &options).unwrap();
+        assert_eq!(report.status, 200);
+        let head = seen.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(head.starts_with("GET http://origin.invalid/path?q=1 HTTP/1.1\r\n"), "{head}");
+    }
+
+    #[test]
+    fn https_through_a_proxy_asks_for_a_connect_tunnel() {
+        let (proxy, seen) = fake_proxy("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+        let mut options = PingOptions::new(Duration::from_secs(5));
+        options.proxy = crate::proxy::ProxySettings::explicit(None, Some(proxy.as_str())).unwrap();
+        let err = ping_with("https://origin.invalid/", &options).unwrap_err();
+        let head = seen.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(head.starts_with("CONNECT origin.invalid:443 HTTP/1.1\r\n"), "{head}");
+        assert!(err.to_string().contains("refused the tunnel"), "{err}");
+    }
+
     #[test]
     fn request_has_host_path_and_connection_close() {
         let url = Url::parse("http://example.test:8080/a/b?x=1").unwrap();
-        let text = String::from_utf8(build_request(&url, &[])).unwrap();
+        let text = String::from_utf8(build_request(&url, &[], false)).unwrap();
         assert!(text.starts_with("GET /a/b?x=1 HTTP/1.1\r\n"));
         assert!(text.contains("\r\nHost: example.test:8080\r\n"));
         assert!(text.contains("\r\nConnection: close\r\n\r\n"));

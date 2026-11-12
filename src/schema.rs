@@ -224,6 +224,7 @@ fn output_spec() -> Value {
             "ok": false,
             "error": { "code": "string", "message": "string", "hint": "string or null" }
         },
+        "error_codes": crate::errors::ERROR_CODES,
         "notes": "In json mode, stdout holds only the envelope. Logs go to stderr."
     })
 }

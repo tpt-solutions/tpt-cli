@@ -193,6 +193,17 @@
       },
       "ok": false
     },
+    "error_codes": [
+      "usage",
+      "config",
+      "dns",
+      "tls",
+      "connection",
+      "timeout",
+      "io",
+      "aborted",
+      "internal"
+    ],
     "notes": "In json mode, stdout holds only the envelope. Logs go to stderr.",
     "success": {
       "data": "command-specific object",
@@ -225,6 +236,38 @@
           "help": "Request timeout in seconds. Overrides the configured value",
           "id": "timeout",
           "long": "timeout",
+          "multiple": false,
+          "positional": false,
+          "required": false,
+          "short": null,
+          "type": "string",
+          "values": null
+        },
+        {
+          "default": [
+            "1"
+          ],
+          "env": null,
+          "global": false,
+          "help": "Number of pings to send. Above 1, every result is printed, and the exit code is non-zero if any ping failed",
+          "id": "count",
+          "long": "count",
+          "multiple": false,
+          "positional": false,
+          "required": false,
+          "short": "c",
+          "type": "string",
+          "values": null
+        },
+        {
+          "default": [
+            "1"
+          ],
+          "env": null,
+          "global": false,
+          "help": "Seconds to wait between pings when --count is above 1",
+          "id": "interval",
+          "long": "interval",
           "multiple": false,
           "positional": false,
           "required": false,
