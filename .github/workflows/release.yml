@@ -1,0 +1,116 @@
+name: Release
+
+# Runs when a version tag such as v0.1.0 is pushed. It builds tptcli for each
+# supported target, packages the archives, writes SHA256SUMS and publishes a
+# GitHub Release. Run it by hand from the Actions tab (workflow_dispatch) to
+# test the builds without publishing: the publish job only runs for tags.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-version:
+    name: check tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare versions
+        run: |
+          cargo_version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "v${cargo_version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${cargo_version}" >&2
+            exit 1
+          fi
+          echo "version=${cargo_version}" >> "$GITHUB_OUTPUT"
+        id: version
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: check-version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          name="tptcli-v${{ needs.check-version.outputs.version }}-${{ matrix.target }}"
+          mkdir "$name"
+          cp "target/${{ matrix.target }}/release/tptcli" README.md LICENSE-MIT LICENSE-APACHE CHANGELOG.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          echo "ARCHIVE=$name.tar.gz" >> "$GITHUB_ENV"
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "tptcli-v${{ needs.check-version.outputs.version }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/tptcli.exe", README.md, LICENSE-MIT, LICENSE-APACHE, CHANGELOG.md -Destination $name
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          "ARCHIVE=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  publish:
+    name: publish GitHub Release
+    needs: [check-version, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: sha256sum tptcli-* > SHA256SUMS && cat SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Release notes are the matching CHANGELOG section.
+          awk -v v="$version" 'index($0, "## [" v "]") == 1 {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "No CHANGELOG section for $version" >&2; exit 1; fi
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "tptcli ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            --verify-tag
