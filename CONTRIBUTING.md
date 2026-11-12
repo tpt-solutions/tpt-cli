@@ -19,7 +19,7 @@ cargo build
 cargo test --all-targets
 ```
 
-Security issues are not for the public tracker. See [SECURITY.md](SECURITY.md).
+Security issues are not for the public tracker. Report them privately to the TPT Solutions maintainers.
 
 ## Licence of contributions
 
