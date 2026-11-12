@@ -85,6 +85,50 @@
       "short": "y",
       "type": "bool",
       "values": null
+    },
+    {
+      "default": [],
+      "env": null,
+      "global": true,
+      "help": "Use this global config file instead of the default location",
+      "id": "config",
+      "long": "config",
+      "multiple": false,
+      "positional": false,
+      "required": false,
+      "short": null,
+      "type": "string",
+      "values": null
+    },
+    {
+      "default": [],
+      "env": null,
+      "global": true,
+      "help": "In JSON output, print only this field of the envelope, such as `data.status` or `data.items.0`",
+      "id": "select",
+      "long": "select",
+      "multiple": false,
+      "positional": false,
+      "required": false,
+      "short": null,
+      "type": "string",
+      "values": null
+    },
+    {
+      "default": [
+        "false"
+      ],
+      "env": null,
+      "global": true,
+      "help": "On an error, also print the internal detail (the Rust debug form of the error)",
+      "id": "debug",
+      "long": "debug",
+      "multiple": false,
+      "positional": false,
+      "required": false,
+      "short": null,
+      "type": "bool",
+      "values": null
     }
   ],
   "exit_codes": [
@@ -187,6 +231,36 @@
           "short": null,
           "type": "string",
           "values": null
+        },
+        {
+          "default": [
+            "0"
+          ],
+          "env": null,
+          "global": false,
+          "help": "Retry a refused or reset connection, or a timeout, this many times. Waits 200 ms, 400 ms, ... between tries",
+          "id": "retries",
+          "long": "retries",
+          "multiple": false,
+          "positional": false,
+          "required": false,
+          "short": null,
+          "type": "string",
+          "values": null
+        },
+        {
+          "default": [],
+          "env": null,
+          "global": false,
+          "help": "Extra request header, as `Name: value`. Repeat for more headers",
+          "id": "headers",
+          "long": "header",
+          "multiple": true,
+          "positional": false,
+          "required": false,
+          "short": "H",
+          "type": "string",
+          "values": null
         }
       ],
       "name": "ping",
@@ -208,9 +282,245 @@
           "short": null,
           "type": "string",
           "values": null
+        },
+        {
+          "default": [
+            "tree"
+          ],
+          "env": null,
+          "global": false,
+          "help": "`tree` describes commands and arguments. `mcp` lists tools with JSON Schema inputs, for MCP clients and agent frameworks",
+          "id": "format",
+          "long": "format",
+          "multiple": false,
+          "positional": false,
+          "required": false,
+          "short": null,
+          "type": "enum",
+          "values": [
+            "tree",
+            "mcp"
+          ]
         }
       ],
       "name": "schema",
+      "subcommands": []
+    },
+    {
+      "about": "Check the setup: config files, resolved settings, DNS and TLS trust roots",
+      "args": [],
+      "name": "doctor",
+      "subcommands": []
+    },
+    {
+      "about": "Write a commented starter config file",
+      "args": [
+        {
+          "default": [
+            "false"
+          ],
+          "env": null,
+          "global": false,
+          "help": "Write `./.tpt.toml` in the current directory instead of the global config file",
+          "id": "local",
+          "long": "local",
+          "multiple": false,
+          "positional": false,
+          "required": false,
+          "short": null,
+          "type": "bool",
+          "values": null
+        }
+      ],
+      "name": "init",
+      "subcommands": []
+    },
+    {
+      "about": "Show, read, change or edit the configuration",
+      "args": [],
+      "name": "config",
+      "subcommands": [
+        {
+          "about": "Print the path of the global config file",
+          "args": [],
+          "name": "path",
+          "subcommands": []
+        },
+        {
+          "about": "List every setting with its effective value and where it comes from",
+          "args": [],
+          "name": "list",
+          "subcommands": []
+        },
+        {
+          "about": "Print the effective value of one setting",
+          "args": [
+            {
+              "default": [],
+              "env": null,
+              "global": false,
+              "help": "The setting name, such as `timeout_secs`",
+              "id": "key",
+              "long": null,
+              "multiple": false,
+              "positional": true,
+              "required": true,
+              "short": null,
+              "type": "string",
+              "values": null
+            }
+          ],
+          "name": "get",
+          "subcommands": []
+        },
+        {
+          "about": "Set a value in the global config file (or the local file with `--local`)",
+          "args": [
+            {
+              "default": [],
+              "env": null,
+              "global": false,
+              "help": "The setting name, such as `timeout_secs`",
+              "id": "key",
+              "long": null,
+              "multiple": false,
+              "positional": true,
+              "required": true,
+              "short": null,
+              "type": "string",
+              "values": null
+            },
+            {
+              "default": [],
+              "env": null,
+              "global": false,
+              "help": "The new value",
+              "id": "value",
+              "long": null,
+              "multiple": false,
+              "positional": true,
+              "required": true,
+              "short": null,
+              "type": "string",
+              "values": null
+            },
+            {
+              "default": [
+                "false"
+              ],
+              "env": null,
+              "global": false,
+              "help": "Write `./.tpt.toml` instead of the global file",
+              "id": "local",
+              "long": "local",
+              "multiple": false,
+              "positional": false,
+              "required": false,
+              "short": null,
+              "type": "bool",
+              "values": null
+            }
+          ],
+          "name": "set",
+          "subcommands": []
+        },
+        {
+          "about": "Open the global config file in `$VISUAL`, `$EDITOR` or a platform default",
+          "args": [],
+          "name": "edit",
+          "subcommands": []
+        },
+        {
+          "about": "Print this message or the help of the given subcommand(s)",
+          "args": [],
+          "name": "help",
+          "subcommands": [
+            {
+              "about": "Print the path of the global config file",
+              "args": [],
+              "name": "path",
+              "subcommands": []
+            },
+            {
+              "about": "List every setting with its effective value and where it comes from",
+              "args": [],
+              "name": "list",
+              "subcommands": []
+            },
+            {
+              "about": "Print the effective value of one setting",
+              "args": [],
+              "name": "get",
+              "subcommands": []
+            },
+            {
+              "about": "Set a value in the global config file (or the local file with `--local`)",
+              "args": [],
+              "name": "set",
+              "subcommands": []
+            },
+            {
+              "about": "Open the global config file in `$VISUAL`, `$EDITOR` or a platform default",
+              "args": [],
+              "name": "edit",
+              "subcommands": []
+            },
+            {
+              "about": "Print this message or the help of the given subcommand(s)",
+              "args": [],
+              "name": "help",
+              "subcommands": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "about": "Print a shell completion script to stdout",
+      "args": [
+        {
+          "default": [],
+          "env": null,
+          "global": false,
+          "help": "The shell to generate the script for",
+          "id": "shell",
+          "long": null,
+          "multiple": false,
+          "positional": true,
+          "required": true,
+          "short": null,
+          "type": "enum",
+          "values": [
+            "bash",
+            "elvish",
+            "fish",
+            "powershell",
+            "zsh"
+          ]
+        }
+      ],
+      "name": "completions",
+      "subcommands": []
+    },
+    {
+      "about": "Print the manual page to stdout, or write one page per command to a directory",
+      "args": [
+        {
+          "default": [],
+          "env": null,
+          "global": false,
+          "help": "Write the pages (`tptcli.1` and one page per command) into this directory",
+          "id": "dir",
+          "long": "dir",
+          "multiple": false,
+          "positional": false,
+          "required": false,
+          "short": null,
+          "type": "string",
+          "values": null
+        }
+      ],
+      "name": "man",
       "subcommands": []
     },
     {
@@ -228,6 +538,67 @@
           "about": "Print the command tree as JSON, for agents and tooling",
           "args": [],
           "name": "schema",
+          "subcommands": []
+        },
+        {
+          "about": "Check the setup: config files, resolved settings, DNS and TLS trust roots",
+          "args": [],
+          "name": "doctor",
+          "subcommands": []
+        },
+        {
+          "about": "Write a commented starter config file",
+          "args": [],
+          "name": "init",
+          "subcommands": []
+        },
+        {
+          "about": "Show, read, change or edit the configuration",
+          "args": [],
+          "name": "config",
+          "subcommands": [
+            {
+              "about": "Print the path of the global config file",
+              "args": [],
+              "name": "path",
+              "subcommands": []
+            },
+            {
+              "about": "List every setting with its effective value and where it comes from",
+              "args": [],
+              "name": "list",
+              "subcommands": []
+            },
+            {
+              "about": "Print the effective value of one setting",
+              "args": [],
+              "name": "get",
+              "subcommands": []
+            },
+            {
+              "about": "Set a value in the global config file (or the local file with `--local`)",
+              "args": [],
+              "name": "set",
+              "subcommands": []
+            },
+            {
+              "about": "Open the global config file in `$VISUAL`, `$EDITOR` or a platform default",
+              "args": [],
+              "name": "edit",
+              "subcommands": []
+            }
+          ]
+        },
+        {
+          "about": "Print a shell completion script to stdout",
+          "args": [],
+          "name": "completions",
+          "subcommands": []
+        },
+        {
+          "about": "Print the manual page to stdout, or write one page per command to a directory",
+          "args": [],
+          "name": "man",
           "subcommands": []
         },
         {

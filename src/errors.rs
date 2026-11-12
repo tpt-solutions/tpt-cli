@@ -90,6 +90,20 @@ pub struct ConfigError {
     pub message: String,
 }
 
+impl ConfigError {
+    /// A problem with a whole file, with no line or column.
+    ///
+    /// ```
+    /// use tpt::errors::ConfigError;
+    ///
+    /// let err = ConfigError::in_file("a.toml", "file not found");
+    /// assert_eq!(err.to_string(), "a.toml: file not found");
+    /// ```
+    pub fn in_file(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
+        Self { path: Some(path.into()), line: None, column: None, message: message.into() }
+    }
+}
+
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(path) = &self.path {

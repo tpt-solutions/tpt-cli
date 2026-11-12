@@ -181,6 +181,48 @@ Decisions locked in:
 - [ ] Benchmark against ring (handshake time, throughput, binary size)
 - [ ] Swap into `tpt-cli`, drop the `ring` exception from `deny.toml` and update the README
 
+## Phase 10: Review fixes, adoption tooling and extras (post-review, 2026-11-12)
+Out of scope here: Phase 9 (custom TLS/crypto) and crates.io publishing (blocked by the git dependency on `tpt-crypto-rustls`).
+
+### 10a: Fixes
+- [x] CI: `release-build` job uses `target/release/tpt`; the binary is `tptcli` (`ci.yml:62-64`, plus the step title)
+- [x] Wire up the dead `--yes` flag (`src/cli.rs:30`): read it in `main.rs`/`CliOverrides` and give a command a real use of `prompts::confirm_action`
+- [x] Delete `SECURITY.md` (decided) and remove all references: `.github/ISSUE_TEMPLATE/config.yml`, `README.md` (lines ~180, 207-208), `CONTRIBUTING.md:22`, `CHANGELOG.md:17`, the `Cargo.toml:36` comment. Keep the unaudited-TLS warning in the README itself
+- [x] README: `tpt` -> `tptcli` in the examples (lines ~32, 34)
+- [ ] CHANGELOG: move the reqwest/ring/rename entries to the right section and fix stale wording in 0.1.0 (still says `ring` and `tpt`)
+- [ ] `THIRD-PARTY-LICENSES.md`: drop the removed `sync_wrapper`/`ryu` exceptions from the intro and regenerate (the list is Windows-only; note it or generate per platform)
+- [ ] Refresh stale notes in this file: tick line 171 (`sync_wrapper`, done by line 174); update the decisions list at the top (reqwest, `ring`, `tpt` binary name, `dirs`, `tpt-solutions/tpt-cli`)
+- [x] Config path: honour `XDG_CONFIG_HOME` and `%APPDATA%`, keep `~/.config/tpt/config.toml` as a fallback (`src/config.rs:149`)
+- [x] CI: add `cargo doc` with `RUSTDOCFLAGS=-D warnings` and a clippy run with `--no-default-features`
+- [ ] Doctests for `net::ping`, `Output::data/error/info/warn` and the logger wrappers
+- [ ] Missing tests: `prompts.rs`, `logger.rs`, `NO_COLOR`/TTY behaviour, Windows config path, a real HTTPS integration test
+- [x] Verify the CI trigger branch (`master`) matches the repo default branch
+
+### 10b: Adoption tooling
+- [x] `tptcli completions <shell>` (clap_complete: bash, zsh, fish, powershell, elvish); check the size impact against the size-first release profile
+- [x] `tptcli man` (clap_mangen)
+- [x] `tptcli init`: write a commented starter config (global, or `--local` for `./.tpt.toml`); confirm before overwrite, honour `--yes`
+- [x] `tptcli config {path,list,get,set,edit}` and a global `--config <path>` flag; `config list` shows each value's source (default, file, env, flag)
+- [x] `tptcli doctor`: version, config files and parse status, resolved values with sources, DNS and TLS root-store check, optional connectivity test; works with `--output json`
+- [x] Release workflow on tag: linux/macos/windows builds (x86_64 and aarch64 where possible), archives, `SHA256SUMS`, release notes from the CHANGELOG. Evaluate `cargo-dist` first (decision needed: cargo-dist or a hand-written workflow)
+- [ ] `[package.metadata.binstall]` for `cargo binstall`; Cargo.toml metadata (repository, keywords, categories)
+- [x] `install.sh` and `install.ps1` (checksum-verified)
+- [ ] Dockerfile (not started)
+- [ ] After the first release: Scoop and winget manifests, Homebrew formula
+- [ ] `cargo-fuzz` target for `net::parse_reply` / `read_head`; coverage job in CI
+
+### 10c: Extras (agent- and human-friendly)
+- [x] `schema --format mcp`: MCP-style tool definitions, one per leaf command, with JSON Schema `inputSchema`. Done as one format (`mcp`), not separate `json-schema` output. Snapshot updated deliberately
+- [x] Minimal field selection for JSON output (`--select data.status`, dot-path, no heavy deps)
+- [x] Progress line (documented spinner was never built): shown for `ping` on a human terminal only, off for JSON, pipes and `--quiet`. Not animated, so it is a status line rather than a spinner
+- [x] `ping`: `--retries` with backoff (transient failures only), `--header`, timing breakdown (dns, connect, tls, ttfb) and `attempts` in the JSON output
+- [ ] `ping --count`/`--interval`: deferred, because a partial failure across several pings has no clean exit code or JSON shape yet (decide first)
+- [ ] `ping` proxy support (`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`): deferred, HTTPS needs a CONNECT tunnel
+- [x] `--debug` flag prints the Rust debug form of the error
+- [ ] Error hints with dynamic context (hints are still static strings)
+- [ ] Error-code table exposed in `schema` (exit codes are already listed; error codes are not)
+- [ ] Scaffold for consumers: `cargo generate` template or `tptcli new`, based on `examples/basic_cmd`
+
 ## Backlog / not in scope (decide later)
 - [ ] Publish to crates.io (check the `tpt-cli` name is available)
 - [ ] Prebuilt binaries on GitHub Releases (cross-compiled, checksums)

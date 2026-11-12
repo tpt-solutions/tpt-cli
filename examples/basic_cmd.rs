@@ -76,7 +76,7 @@ fn main() -> ExitCode {
         Command::Greet(args) => {
             let greeting = if config.greeting.is_empty() { "Hello" } else { config.greeting.as_str() };
             let message = format!("{greeting}, {}!", args.name);
-            output.data(&message, &json!({ "message": message })).map_err(TptError::from)
+            output.data(&message, &json!({ "message": message }))
         }
         Command::Schema => {
             let value = schema::command_tree(&Acme::command());

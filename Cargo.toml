@@ -33,8 +33,10 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
 toml = "1.2.1"
-# Pure-Rust TLS crypto provider for rustls (unaudited; see README and SECURITY.md).
+# Pure-Rust TLS crypto provider for rustls (unaudited; see the README security warning).
 tpt-crypto-rustls = { version = "0.1.0", git = "https://github.com/tpt-solutions/tpt-crypto-rustls", rev = "e6b5fcbb6a872d5e6fde507f29d21e576bac46e6", optional = true }
+clap_complete = "4.6.11"
+clap_mangen = "0.3.3"
 
 [features]
 default = ["net", "prompts"]

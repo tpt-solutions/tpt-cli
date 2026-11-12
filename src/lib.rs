@@ -37,6 +37,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod admin;
 pub mod cli;
 pub mod config;
 pub mod errors;

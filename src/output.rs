@@ -10,6 +10,7 @@
 //! Human logs (info, warn, ...) always go to stderr, so stdout stays parseable.
 
 use std::io::{self, IsTerminal, Write};
+use std::sync::{Mutex, OnceLock};
 
 use console::Style;
 use serde::Serialize;
@@ -51,6 +52,42 @@ pub fn error_envelope(err: &TptError) -> Value {
             "hint": err.hint(),
         }
     })
+}
+
+static SELECT: OnceLock<String> = OnceLock::new();
+static PROGRESS_SHOWN: Mutex<bool> = Mutex::new(false);
+
+/// Sets the field path that JSON output is narrowed to, such as `data.status`.
+/// Only the first call has an effect, like the logger level.
+pub fn set_select(path: Option<&str>) {
+    if let Some(path) = path {
+        let _ = SELECT.set(path.to_owned());
+    }
+}
+
+/// Returns the part of `value` at a dot-separated `path`. Array items are addressed by index.
+///
+/// ```
+/// use serde_json::json;
+/// use tpt::output::select_path;
+///
+/// let envelope = json!({ "ok": true, "data": { "status": 200, "items": ["a", "b"] } });
+/// assert_eq!(select_path(&envelope, "data.status").unwrap(), json!(200));
+/// assert_eq!(select_path(&envelope, "data.items.1").unwrap(), json!("b"));
+/// assert!(select_path(&envelope, "data.missing").is_err());
+/// ```
+pub fn select_path(value: &Value, path: &str) -> Result<Value, TptError> {
+    let mut current = value;
+    for part in path.split('.').filter(|p| !p.is_empty()) {
+        let next = match current {
+            Value::Object(map) => map.get(part),
+            Value::Array(items) => part.parse::<usize>().ok().and_then(|i| items.get(i)),
+            _ => None,
+        };
+        current =
+            next.ok_or_else(|| TptError::Usage(format!("--select: no field `{path}` in the output")))?;
+    }
+    Ok(current.clone())
 }
 
 /// Writes results and messages in the chosen [`OutputMode`].
@@ -108,15 +145,46 @@ impl Output {
         self.color
     }
 
-    /// Prints a result. Human mode prints `human` to stdout. JSON mode prints the envelope.
-    pub fn data<T: Serialize + ?Sized>(&self, human: &str, value: &T) -> io::Result<()> {
+    /// Prints a result. Human mode prints `human` to stdout. JSON mode prints the envelope,
+    /// or the part picked by `--select`.
+    pub fn data<T: Serialize + ?Sized>(&self, human: &str, value: &T) -> Result<(), TptError> {
+        self.clear_progress();
         let mut stdout = io::stdout().lock();
         match self.mode {
-            OutputMode::Human => writeln!(stdout, "{human}"),
+            OutputMode::Human => writeln!(stdout, "{human}")?,
             OutputMode::Json => {
-                let envelope = success_envelope(value).map_err(io::Error::other)?;
-                writeln!(stdout, "{envelope}")
+                let envelope = success_envelope(value).map_err(|e| TptError::Internal(e.to_string()))?;
+                let shown = match SELECT.get() {
+                    Some(path) => select_path(&envelope, path)?,
+                    None => envelope,
+                };
+                writeln!(stdout, "{shown}")?;
             }
+        }
+        Ok(())
+    }
+
+    /// Shows a one-line progress message on stderr while a slow step runs. Only on a human
+    /// terminal, so JSON output and pipes never see it. Call [`Output::clear_progress`] when done.
+    ///
+    /// This is a plain status line, not an animated spinner.
+    pub fn progress(&self, message: &str) {
+        if self.is_json() || !io::stderr().is_terminal() || logger::level() == LogLevel::Error {
+            return;
+        }
+        if let Ok(mut shown) = PROGRESS_SHOWN.lock() {
+            *shown = true;
+        }
+        eprint!("{message}...");
+        let _ = io::stderr().flush();
+    }
+
+    /// Removes the line written by [`Output::progress`], if there is one.
+    pub fn clear_progress(&self) {
+        let Ok(mut shown) = PROGRESS_SHOWN.lock() else { return };
+        if *shown {
+            console::Term::stderr().clear_line().ok();
+            *shown = false;
         }
     }
 
@@ -149,6 +217,7 @@ impl Output {
 
     /// Reports an error. Human mode prints to stderr with the hint. JSON mode prints the envelope to stdout.
     pub fn error(&self, err: &TptError) {
+        self.clear_progress();
         match self.mode {
             OutputMode::Human => {
                 let label = Style::new().red().bold().force_styling(self.color).apply_to("error");

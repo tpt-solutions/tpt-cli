@@ -22,6 +22,39 @@ const MAX_REDIRECTS: usize = 10;
 /// Upper bound on the response headers we will buffer.
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 
+/// Options for [`ping_with`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PingOptions {
+    /// The time limit for each attempt, covering the whole request.
+    pub timeout: Duration,
+    /// Extra attempts after a transient failure (a refused or reset connection, or a timeout).
+    pub retries: u32,
+    /// Extra request headers, as `Name: value` lines.
+    pub headers: Vec<String>,
+}
+
+impl PingOptions {
+    /// Options with the given timeout, no retries and no extra headers.
+    pub fn new(timeout: Duration) -> Self {
+        Self { timeout, retries: 0, headers: Vec::new() }
+    }
+}
+
+/// Time spent in each stage of the last request, in milliseconds.
+///
+/// `tls_ms` is `None` for plain `http` URLs. Redirects add their stages together.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct Timings {
+    /// Name lookup.
+    pub dns_ms: f64,
+    /// TCP connect.
+    pub connect_ms: f64,
+    /// TLS handshake, or `None` for plain http.
+    pub tls_ms: Option<f64>,
+    /// From sending the request until the response headers arrived.
+    pub ttfb_ms: f64,
+}
+
 /// The result of a `ping`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
@@ -34,8 +67,12 @@ pub struct PingReport {
     pub reason: String,
     /// Time from sending the request to receiving response headers, in milliseconds.
     pub latency_ms: f64,
-    /// The timeout that applied to the request, in seconds.
+    /// The timeout that applied to each attempt, in seconds.
     pub timeout_secs: u64,
+    /// How many attempts were made (1 when nothing needed a retry).
+    pub attempts: u32,
+    /// Per-stage timings of the successful attempt.
+    pub timings: Timings,
 }
 
 /// Sends an HTTP GET to `url` and reports the status and latency.
@@ -44,6 +81,25 @@ pub struct PingReport {
 /// Only `http` and `https` URLs are accepted. Redirects are followed. The timeout covers the
 /// whole request, including DNS, connecting, the TLS handshake and every redirect.
 pub fn ping(url: &str, timeout: Duration) -> Result<PingReport, TptError> {
+    ping_with(url, &PingOptions::new(timeout))
+}
+
+/// Like [`ping`], with retries and extra headers.
+///
+/// Retries apply only to transient failures: a refused or reset connection, or a timeout.
+/// They wait 200 ms, then 400 ms, and so on, up to 2 s. Each attempt gets the full timeout.
+///
+/// ```
+/// use std::time::Duration;
+/// use tpt::net::{PingOptions, ping_with};
+///
+/// let mut options = PingOptions::new(Duration::from_secs(5));
+/// // A malformed header is rejected before any network activity.
+/// options.headers = vec!["bad header".into()];
+/// assert!(ping_with("https://example.com", &options).is_err());
+/// ```
+pub fn ping_with(url: &str, options: &PingOptions) -> Result<PingReport, TptError> {
+    let timeout = options.timeout;
     if timeout.is_zero() {
         return Err(TptError::Usage("the timeout must be at least 1 second".into()));
     }
@@ -54,23 +110,70 @@ pub fn ping(url: &str, timeout: Duration) -> Result<PingReport, TptError> {
             parsed.scheme()
         )));
     }
+    let headers = parse_headers(&options.headers)?;
 
     let target = parsed.to_string();
-    let started = Instant::now();
-    let reply = fetch(parsed, timeout).map_err(|fail| fail.into_error(&target, timeout))?;
-    let latency = started.elapsed();
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let mut timings = Timings::default();
+        let started = Instant::now();
+        match fetch(parsed.clone(), timeout, &headers, &mut timings) {
+            Ok(reply) => {
+                let latency = started.elapsed();
+                let reason = http::StatusCode::from_u16(reply.status)
+                    .ok()
+                    .and_then(|status| status.canonical_reason())
+                    .unwrap_or("");
+                return Ok(PingReport {
+                    url: target,
+                    status: reply.status,
+                    reason: reason.to_owned(),
+                    latency_ms: round_to_hundredths(latency.as_secs_f64() * 1000.0),
+                    timeout_secs: timeout.as_secs(),
+                    attempts: attempt,
+                    timings: round_timings(timings),
+                });
+            }
+            Err(fail) if attempt <= options.retries && fail.is_transient() => {
+                thread::sleep(backoff(attempt));
+            }
+            Err(fail) => return Err(fail.into_error(&target, timeout)),
+        }
+    }
+}
 
-    let reason = http::StatusCode::from_u16(reply.status)
-        .ok()
-        .and_then(|status| status.canonical_reason())
-        .unwrap_or("");
-    Ok(PingReport {
-        url: target,
-        status: reply.status,
-        reason: reason.to_owned(),
-        latency_ms: round_to_hundredths(latency.as_secs_f64() * 1000.0),
-        timeout_secs: timeout.as_secs(),
-    })
+/// Delay before retry number `attempt` (1-based): 200 ms, 400 ms, ... capped at 2 s.
+fn backoff(attempt: u32) -> Duration {
+    let millis = 200u64.saturating_mul(1u64 << (attempt - 1).min(10));
+    Duration::from_millis(millis.min(2_000))
+}
+
+/// Checks the `Name: value` header lines. Names that the client sets itself are refused.
+fn parse_headers(lines: &[String]) -> Result<Vec<(http::HeaderName, http::HeaderValue)>, TptError> {
+    lines
+        .iter()
+        .map(|line| {
+            let usage = |why: String| TptError::Usage(format!("invalid header `{line}`: {why}"));
+            let (name, value) = line.split_once(':').ok_or_else(|| usage("expected `Name: value`".into()))?;
+            let name =
+                http::HeaderName::from_bytes(name.trim().as_bytes()).map_err(|e| usage(e.to_string()))?;
+            if matches!(name.as_str(), "host" | "connection" | "content-length") {
+                return Err(usage(format!("`{name}` is set by tptcli and cannot be overridden")));
+            }
+            let value = http::HeaderValue::from_str(value.trim()).map_err(|e| usage(e.to_string()))?;
+            Ok((name, value))
+        })
+        .collect()
+}
+
+fn round_timings(t: Timings) -> Timings {
+    Timings {
+        dns_ms: round_to_hundredths(t.dns_ms),
+        connect_ms: round_to_hundredths(t.connect_ms),
+        tls_ms: t.tls_ms.map(round_to_hundredths),
+        ttfb_ms: round_to_hundredths(t.ttfb_ms),
+    }
 }
 
 /// A failure inside the client. It is converted to a [`TptError`] once the target URL is known.
@@ -83,6 +186,14 @@ enum Fail {
 impl Fail {
     fn net(kind: NetworkKind, reason: impl Into<String>) -> Fail {
         Fail::Net { kind, reason: reason.into() }
+    }
+
+    /// Timeouts and refused, reset or unreachable connections can succeed on a retry.
+    fn is_transient(&self) -> bool {
+        match self {
+            Fail::Timeout => true,
+            Fail::Net { kind, .. } => *kind == NetworkKind::Connect,
+        }
     }
 
     fn into_error(self, url: &str, timeout: Duration) -> TptError {
@@ -101,13 +212,18 @@ struct Reply {
 }
 
 /// Follows redirects, under one deadline shared by every hop.
-fn fetch(start: Url, timeout: Duration) -> Result<Reply, Fail> {
+fn fetch(
+    start: Url,
+    timeout: Duration,
+    headers: &[(http::HeaderName, http::HeaderValue)],
+    timings: &mut Timings,
+) -> Result<Reply, Fail> {
     let deadline = Instant::now() + timeout;
     let mut tls: Option<Arc<ClientConfig>> = None;
     let mut current = start;
     let mut hops = 0usize;
     loop {
-        let reply = request_once(&current, deadline, &mut tls)?;
+        let reply = request_once(&current, deadline, &mut tls, headers, timings)?;
         let Some(location) = reply.location.as_deref().filter(|_| is_redirect(reply.status)) else {
             return Ok(reply);
         };
@@ -136,16 +252,27 @@ fn is_redirect(status: u16) -> bool {
 }
 
 /// Makes one request to `url` without following redirects.
-fn request_once(url: &Url, deadline: Instant, tls: &mut Option<Arc<ClientConfig>>) -> Result<Reply, Fail> {
+fn request_once(
+    url: &Url,
+    deadline: Instant,
+    tls: &mut Option<Arc<ClientConfig>>,
+    headers: &[(http::HeaderName, http::HeaderValue)],
+    timings: &mut Timings,
+) -> Result<Reply, Fail> {
     let host = url.host_str().ok_or_else(|| Fail::net(NetworkKind::Other, "the URL has no host"))?;
     let port =
         url.port_or_known_default().ok_or_else(|| Fail::net(NetworkKind::Other, "the URL has no port"))?;
     // IPv6 literals come back in brackets. Socket and TLS APIs want them bare.
     let bare_host = host.trim_start_matches('[').trim_end_matches(']');
 
+    let step = Instant::now();
     let addrs = resolve(bare_host, port, deadline)?;
+    timings.dns_ms += ms_since(step);
+
+    let step = Instant::now();
     let mut tcp = connect(&addrs, deadline)?;
-    let request = build_request(url);
+    timings.connect_ms += ms_since(step);
+    let request = build_request(url, headers);
 
     if url.scheme() == "https" {
         let config = tls_config(tls)?;
@@ -153,12 +280,24 @@ fn request_once(url: &Url, deadline: Instant, tls: &mut Option<Arc<ClientConfig>
             .map_err(|e| Fail::net(NetworkKind::Tls, format!("invalid server name `{bare_host}`: {e}")))?;
         let mut conn =
             ClientConnection::new(config, name).map_err(|e| Fail::net(NetworkKind::Tls, e.to_string()))?;
+        let step = Instant::now();
         handshake(&mut conn, &mut tcp, deadline)?;
+        *timings.tls_ms.get_or_insert(0.0) += ms_since(step);
         let mut stream = StreamOwned::new(conn, tcp);
-        exchange(&mut stream, deadline, &request)
+        let step = Instant::now();
+        let reply = exchange(&mut stream, deadline, &request)?;
+        timings.ttfb_ms += ms_since(step);
+        Ok(reply)
     } else {
-        exchange(&mut tcp, deadline, &request)
+        let step = Instant::now();
+        let reply = exchange(&mut tcp, deadline, &request)?;
+        timings.ttfb_ms += ms_since(step);
+        Ok(reply)
     }
+}
+
+fn ms_since(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
 }
 
 /// The time left before `deadline`. Fails with a timeout once none is left.
@@ -336,8 +475,8 @@ fn parse_reply(raw: &[u8]) -> Result<Reply, Fail> {
     Ok(Reply { status, location })
 }
 
-/// The request line and headers for a `GET` of `url`.
-fn build_request(url: &Url) -> Vec<u8> {
+/// The request line and headers for a `GET` of `url`, with any extra headers.
+fn build_request(url: &Url, extra: &[(http::HeaderName, http::HeaderValue)]) -> Vec<u8> {
     let mut path = url.path().to_owned();
     if let Some(query) = url.query() {
         path.push('?');
@@ -348,11 +487,15 @@ fn build_request(url: &Url) -> Vec<u8> {
         Some(port) => format!("{host}:{port}"),
         None => host.to_owned(),
     };
-    format!(
-        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nUser-Agent: tpt-cli/{}\r\nAccept: */*\r\nConnection: close\r\n\r\n",
+    let mut request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nUser-Agent: tpt-cli/{}\r\nAccept: */*\r\nConnection: close\r\n",
         env!("CARGO_PKG_VERSION")
-    )
-    .into_bytes()
+    );
+    for (name, value) in extra {
+        request.push_str(&format!("{name}: {}\r\n", value.to_str().unwrap_or_default()));
+    }
+    request.push_str("\r\n");
+    request.into_bytes()
 }
 
 /// Classifies an I/O error. TLS errors come through as `io::Error` wrapping a `rustls::Error`.
@@ -481,9 +624,52 @@ mod tests {
     }
 
     #[test]
+    fn extra_headers_are_sent_and_reserved_ones_refused() {
+        let url = Url::parse("http://example.test/").unwrap();
+        let headers = parse_headers(&["X-Trace: abc".to_owned()]).unwrap();
+        let text = String::from_utf8(build_request(&url, &headers)).unwrap();
+        // The `http` crate stores header names in lower case. HTTP treats names as case-insensitive.
+        assert!(text.contains("\r\nx-trace: abc\r\n"));
+        assert!(parse_headers(&["Host: evil.test".to_owned()]).is_err());
+        assert!(parse_headers(&["no colon".to_owned()]).is_err());
+        assert!(parse_headers(&["X-Bad: a\r\nInjected: 1".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn backoff_doubles_and_is_capped() {
+        assert_eq!(backoff(1), Duration::from_millis(200));
+        assert_eq!(backoff(2), Duration::from_millis(400));
+        assert_eq!(backoff(20), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn refused_connections_are_retried_then_reported() {
+        // Bind and drop a listener to get a local port that refuses connections.
+        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{port}/");
+        let mut options = PingOptions::new(Duration::from_secs(2));
+        options.retries = 1;
+        let err = ping_with(&url, &options).unwrap_err();
+        // Windows can report a refused local connection as a timeout. Both are transient.
+        assert!(
+            matches!(err, TptError::Timeout { .. } | TptError::Network { kind: NetworkKind::Connect, .. }),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn successful_ping_reports_attempts_and_timings() {
+        let base = serve(vec![OK]);
+        let report = ping(&base, Duration::from_secs(5)).unwrap();
+        assert_eq!(report.attempts, 1);
+        assert_eq!(report.timings.tls_ms, None, "plain http has no TLS stage");
+        assert!(report.timings.ttfb_ms >= 0.0);
+    }
+
+    #[test]
     fn request_has_host_path_and_connection_close() {
         let url = Url::parse("http://example.test:8080/a/b?x=1").unwrap();
-        let text = String::from_utf8(build_request(&url)).unwrap();
+        let text = String::from_utf8(build_request(&url, &[])).unwrap();
         assert!(text.starts_with("GET /a/b?x=1 HTTP/1.1\r\n"));
         assert!(text.contains("\r\nHost: example.test:8080\r\n"));
         assert!(text.contains("\r\nConnection: close\r\n\r\n"));

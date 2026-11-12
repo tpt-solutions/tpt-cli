@@ -3,7 +3,8 @@
 //! Layers, lowest priority first:
 //!
 //! 1. Defaults (`Default` for the config struct)
-//! 2. Global file: `~/.config/<app>/config.toml` (same path on every OS)
+//! 2. Global file: `$XDG_CONFIG_HOME/<app>/config.toml`, or `%APPDATA%\<app>\config.toml`
+//!    on Windows, falling back to `~/.config/<app>/config.toml` (see [`global_config_candidates`])
 //! 3. Local file: `./.<app>.toml` in the current directory
 //! 4. Environment variables: `<PREFIX>_<KEY>` (for example `TPT_LOG_LEVEL`)
 //! 5. CLI overrides (highest priority)
@@ -141,13 +142,58 @@ pub struct ConfigLoader {
     cli: Table,
 }
 
+/// Candidate global config paths for `app_name`, most preferred first.
+///
+/// 1. `$XDG_CONFIG_HOME/<app>/config.toml` (when `XDG_CONFIG_HOME` is set)
+/// 2. `%APPDATA%\<app>\config.toml` (Windows only)
+/// 3. `~/.config/<app>/config.toml` (the fallback used by earlier versions)
+///
+/// [`global_config_path`] picks the first candidate that exists, so existing
+/// files keep working. When none exists, the first candidate is the place to create one.
+pub fn global_config_candidates(app_name: &str) -> Vec<PathBuf> {
+    let file = Path::new("config.toml");
+    let mut candidates = Vec::new();
+    let env_dir = |name: &str| {
+        std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from).filter(|p| p.is_absolute())
+    };
+    if let Some(xdg) = env_dir("XDG_CONFIG_HOME") {
+        candidates.push(xdg.join(app_name).join(file));
+    }
+    if cfg!(windows)
+        && let Some(appdata) = env_dir("APPDATA")
+    {
+        candidates.push(appdata.join(app_name).join(file));
+    }
+    if let Some(home) = std::env::home_dir() {
+        candidates.push(home.join(".config").join(app_name).join(file));
+    }
+    let mut seen = Vec::new();
+    candidates.retain(|p| {
+        if seen.contains(p) {
+            false
+        } else {
+            seen.push(p.clone());
+            true
+        }
+    });
+    candidates
+}
+
+/// The global config file that applies for `app_name`: the first existing candidate,
+/// or else the preferred location where a new file would be created.
+///
+/// Returns `None` only when no candidate can be built (no home directory and no config env vars).
+pub fn global_config_path(app_name: &str) -> Option<PathBuf> {
+    let candidates = global_config_candidates(app_name);
+    candidates.iter().find(|p| p.is_file()).or(candidates.first()).cloned()
+}
+
 impl ConfigLoader {
     /// Creates a loader for `app_name`, reading the real process environment.
     pub fn new(app_name: &str) -> Self {
         Self {
             env_prefix: format!("{}_", app_name.to_ascii_uppercase().replace('-', "_")),
-            global_file: std::env::home_dir()
-                .map(|home| home.join(".config").join(app_name).join("config.toml")),
+            global_file: global_config_path(app_name),
             local_file: Some(PathBuf::from(format!(".{app_name}.toml"))),
             env: process_env(),
             cli: Table::new(),
@@ -310,7 +356,7 @@ impl ConfigLoader {
 }
 
 /// Reads one TOML layer. Returns `Ok(None)` if the file does not exist.
-fn read_layer(path: &Path) -> Result<Option<Table>, TptError> {
+pub(crate) fn read_layer(path: &Path) -> Result<Option<Table>, TptError> {
     match fs::read_to_string(path) {
         Ok(text) => match toml::from_str::<Table>(&text) {
             Ok(table) => Ok(Some(table)),

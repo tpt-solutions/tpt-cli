@@ -24,14 +24,31 @@ Or build it in place:
 cargo build --release   # binary at target/release/tptcli
 ```
 
-Linux, macOS and Windows are supported.
+Prebuilt binaries are attached to each [GitHub Release](https://github.com/TPT-Solutions/tpt-cli/releases),
+with a `SHA256SUMS` file. The install scripts download one, check its checksum, and install it.
+
+```sh
+# Linux and macOS
+curl -fsSL https://raw.githubusercontent.com/TPT-Solutions/tpt-cli/master/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/TPT-Solutions/tpt-cli/master/install.ps1 | iex
+```
+
+Linux, macOS and Windows are supported. Prebuilt binaries cover x86_64 and aarch64 on Linux,
+Apple silicon and Intel on macOS, and x86_64 on Windows.
 
 ## Quick start
 
 ```sh
-tpt --help
+tptcli --help
+tptcli init                       # write a commented starter config
+tptcli doctor                     # check config files, DNS and TLS trust roots
+tptcli config list                # every setting, its value and where it came from
 tptcli ping https://example.com
-tpt --output json ping https://example.com
+tptcli --output json ping https://example.com
 tptcli schema
 ```
 
@@ -49,7 +66,18 @@ accepted. Redirects are followed.
 
 ```sh
 tptcli ping https://example.com --timeout 3
+tptcli ping https://example.com --retries 2 --header "X-Trace: 42"
 ```
+
+`--retries N` tries again after a refused or reset connection or a timeout, waiting 200 ms, 400 ms and
+so on between tries. Each try gets the full timeout. `--header` (or `-H`) adds a request header and can
+be repeated. `Host`, `Connection` and `Content-Length` are set by tptcli and cannot be overridden.
+
+The JSON output includes `attempts` and a `timings` object with `dns_ms`, `connect_ms`, `tls_ms` (null for
+plain http) and `ttfb_ms`. Proxy support is not implemented yet.
+
+On a human terminal, `ping` shows a `requesting <url>...` status line while it runs. The line is removed
+when the request finishes. It is not shown with `--output json`, when output is piped, or with `--quiet`.
 
 ### `tptcli schema [COMMAND]`
 
@@ -57,24 +85,59 @@ Prints the command tree as JSON, so agents can find commands and arguments witho
 `--help`. `tptcli schema ping` describes one command. The output is always JSON, in every
 output mode.
 
+`tptcli schema --format mcp` prints tool definitions instead: one per leaf command, each with a JSON Schema
+`inputSchema` built from its arguments. Use it to register tptcli with an MCP client or agent framework.
+Add a command name, such as `tptcli schema --format mcp ping`, to list only that command's tools.
+
 Top-level fields: `schema_version`, `name`, `about`, `args`, `subcommands`, `exit_codes`
 and `output`. Each argument has `id`, `long`, `short`, `positional`, `required`, `global`,
 `type` (`string`, `bool`, `count` or `enum`), `multiple`, `values`, `default`, `env` and
 `help`. Global flags are listed on the root, and single-command output includes them too.
 Help and version flags are left out.
 
+### Setup and maintenance commands
+
+| Command | What it does |
+|---|---|
+| `tptcli init [--local]` | Writes a commented starter config. `--local` writes `./.tpt.toml`. Asks before overwriting; `--yes` skips the question. |
+| `tptcli config path` | Prints the global config file path. |
+| `tptcli config list` | Lists each setting with its effective value and its source (`default`, `global file`, `local file`, `env`, `flag`). |
+| `tptcli config get <KEY>` | Prints one effective value. |
+| `tptcli config set <KEY> <VALUE> [--local]` | Writes a value to the config file after checking it. Comments in an existing file are not kept. |
+| `tptcli config edit` | Opens the global file in `$VISUAL`, `$EDITOR`, or `notepad` / `vi`. |
+| `tptcli doctor` | Checks the tool's version, config files, resolved settings, the DNS resolver and the OS TLS trust roots. Makes no network requests. Exit code is 0 even when a check fails, so read the report. |
+| `tptcli completions <SHELL>` | Prints a completion script for `bash`, `zsh`, `fish`, `powershell` or `elvish`. |
+| `tptcli man [--dir DIR]` | Prints the manual page, or writes `tptcli.1` and one page per command into `DIR`. |
+
+Shell completion examples:
+
+```sh
+tptcli completions bash > ~/.local/share/bash-completion/completions/tptcli
+tptcli completions zsh > "${fpath[1]}/_tptcli"
+```
+
+```powershell
+tptcli completions powershell | Out-String | Invoke-Expression   # current session only
+```
+
 ## Configuration
 
 Settings resolve in this order. Later items win:
 
 1. Built-in defaults
-2. Global file: `~/.config/tpt/config.toml`
+2. Global file (see below)
 3. Local file: `./.tpt.toml` in the current directory
 4. Environment variables: `TPT_<KEY>`, for example `TPT_LOG_LEVEL=debug`
-5. Command-line flags
+5. Command-line flags, including `--config <PATH>` to use a different global file
 
-The global path is the same on every OS. Use `~/.config/tpt/config.toml`
-on Windows too, which resolves to `%USERPROFILE%\.config\tpt\config.toml`.
+The global file is the first of these that exists:
+
+1. `$XDG_CONFIG_HOME/tpt/config.toml`, when `XDG_CONFIG_HOME` is set
+2. `%APPDATA%\tpt\config.toml` on Windows
+3. `~/.config/tpt/config.toml` (the path used by earlier versions, still read)
+
+If none exists, `tptcli init` and `tptcli config set` create the first one. Run `tptcli config path`
+to see which file is in use.
 
 Missing files are not an error. A malformed file is an error, and it reports the file,
 line and column.
@@ -121,6 +184,23 @@ Failure:
 
 Error `code` values: `usage`, `config`, `dns`, `tls`, `connection`, `timeout`, `io`,
 `aborted` and `internal`. Check the exit code and the `code` field, not the message text.
+
+### Narrowing the output with `--select`
+
+`--select <PATH>` prints one part of the JSON envelope. The path is dot-separated and starts at the
+top of the envelope. Array items are addressed by index.
+
+```sh
+tptcli --output json --select data.status ping https://example.com   # prints: 200
+tptcli --output json --select data.timings.ttfb_ms ping https://example.com
+```
+
+A path that does not exist is a usage error. `--select` has no effect in human output.
+
+### Debugging an error with `--debug`
+
+On an error, `--debug` also prints the Rust debug form of the error to stderr, which includes the
+internal detail that the normal message leaves out. Use it when reporting a bug.
 
 ## Exit codes
 
@@ -177,7 +257,7 @@ network code. The `tptcli` binary requires `net`. Neither build contains `ring` 
 > `tpt-crypto-rustls`, a rustls provider built on `tpt-crypto`. Both are hand-written pure-Rust
 > crypto that has not been independently audited or formally verified. Treat HTTPS results from
 > `tptcli ping` as best-effort until the audit is done. Do not rely on them to protect sensitive
-> traffic. See [SECURITY.md](SECURITY.md).
+> traffic. Report suspected flaws in the TLS path as security issues, not on the public tracker.
 
 ## Licensing
 
@@ -204,5 +284,4 @@ No licence exceptions remain. The one documented advisory exception is in [`deny
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in
-[SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).

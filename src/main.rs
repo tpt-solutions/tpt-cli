@@ -1,17 +1,22 @@
-//! The `tpt` binary. It is a thin layer over the library: parse, resolve
+//! The `tptcli` binary. It is a thin layer over the library: parse, resolve
 //! config, run, and report errors with the right exit code.
 
 use std::ffi::OsString;
+use std::io;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{CommandFactory, Parser};
+use serde_json::json;
 
-use tpt::cli::{Cli, Commands};
-use tpt::config::{CliOverrides, ConfigLoader, DEFAULT_APP_NAME, OutputMode, TptConfig};
-use tpt::errors::{EXIT_SUCCESS, EXIT_USAGE, TptError};
+use tpt::admin::{self, LOCAL_CONFIG_FILE};
+use tpt::cli::{Cli, Commands, ConfigCommand, ManArgs, SchemaFormat};
+use tpt::config::{CliOverrides, ConfigLoader, DEFAULT_APP_NAME, OutputMode, TptConfig, global_config_path};
+use tpt::errors::{ConfigError, EXIT_SUCCESS, EXIT_USAGE, TptError};
 use tpt::logger::{self, LogLevel};
 use tpt::output::Output;
+use tpt::prompts::confirm_action;
 use tpt::{net, schema};
 
 fn main() -> ExitCode {
@@ -41,6 +46,9 @@ fn main() -> ExitCode {
                 Err(other) => TptError::Internal(format!("{other:#}")),
             };
             Output::new(mode).error(&err);
+            if cli.debug {
+                eprintln!("debug: {err:?}");
+            }
             ExitCode::from(err.exit_code())
         }
     }
@@ -49,9 +57,20 @@ fn main() -> ExitCode {
 /// Runs the command. `mode` is updated once config is resolved, so that
 /// errors raised before that are reported in the right format.
 fn run(cli: &Cli, mode: &mut OutputMode) -> anyhow::Result<()> {
+    // Commands that print raw output run before config is loaded, so a broken
+    // config file cannot stop shell completions or the manual page.
+    match &cli.command {
+        Commands::Completions(args) => {
+            admin::write_completions(args.shell, &mut Cli::command(), &mut io::stdout().lock());
+            return Ok(());
+        }
+        Commands::Man(args) => return man(args),
+        _ => {}
+    }
+
     let timeout_secs = match &cli.command {
         Commands::Ping(args) => args.timeout,
-        Commands::Schema(_) => None,
+        _ => None,
     };
     let log_level = if cli.verbose {
         Some(LogLevel::Debug)
@@ -61,17 +80,32 @@ fn run(cli: &Cli, mode: &mut OutputMode) -> anyhow::Result<()> {
         cli.log_level
     };
     let overrides = CliOverrides { output: cli.output, log_level, timeout_secs };
+    let cli_table = overrides.clone().into_table();
 
-    let config: TptConfig =
-        ConfigLoader::new(DEFAULT_APP_NAME).cli_overrides(overrides.into_table()).load()?;
+    let global = resolve_global(cli)?;
+    let local = Some(PathBuf::from(LOCAL_CONFIG_FILE));
+    let config: TptConfig = ConfigLoader::new(DEFAULT_APP_NAME)
+        .global_file(global.clone())
+        .local_file(local.clone())
+        .cli_overrides(cli_table.clone())
+        .load()?;
     *mode = config.output;
     logger::set_level(config.log_level);
     let output = Output::new(config.output);
     logger::set_color(output.colors_enabled());
+    tpt::output::set_select(cli.select.as_deref());
 
     match &cli.command {
         Commands::Ping(args) => {
-            let report = net::ping(&args.url, Duration::from_secs(config.timeout_secs))?;
+            output.progress(&format!("requesting {}", args.url));
+            let options = net::PingOptions {
+                timeout: Duration::from_secs(config.timeout_secs),
+                retries: args.retries,
+                headers: args.headers.clone(),
+            };
+            let result = net::ping_with(&args.url, &options);
+            output.clear_progress();
+            let report = result?;
             let human = format!(
                 "{} {} {} in {:.2} ms (timeout {}s)",
                 report.url, report.status, report.reason, report.latency_ms, report.timeout_secs
@@ -81,9 +115,10 @@ fn run(cli: &Cli, mode: &mut OutputMode) -> anyhow::Result<()> {
         Commands::Schema(args) => {
             // Schema output is always JSON, in every mode, and has no envelope.
             let root = Cli::command();
-            let value = match &args.command {
-                None => schema::command_tree(&root),
-                Some(name) => schema::command_schema(&root, name).ok_or_else(|| {
+            let value = match (args.format, &args.command) {
+                (SchemaFormat::Mcp, top) => schema::mcp_tools(&root, top.as_deref()),
+                (SchemaFormat::Tree, None) => schema::command_tree(&root),
+                (SchemaFormat::Tree, Some(name)) => schema::command_schema(&root, name).ok_or_else(|| {
                     TptError::Usage(format!(
                         "unknown command `{name}`. Run `tptcli schema` to list every command."
                     ))
@@ -91,8 +126,151 @@ fn run(cli: &Cli, mode: &mut OutputMode) -> anyhow::Result<()> {
             };
             println!("{}", serde_json::to_string_pretty(&value)?);
         }
+        Commands::Doctor => {
+            let report = admin::run_doctor(global, local, &cli_table);
+            output.data(&report.render(), &report)?;
+        }
+        Commands::Init(args) => {
+            let target = if args.local {
+                PathBuf::from(LOCAL_CONFIG_FILE)
+            } else {
+                global.ok_or_else(no_config_dir)?
+            };
+            if target.exists()
+                && !confirm_action(
+                    &output,
+                    &format!("{} already exists. Overwrite it?", target.display()),
+                    cli.yes,
+                )?
+            {
+                output.data(
+                    &format!("left {} unchanged", target.display()),
+                    &json!({ "path": target, "written": false }),
+                )?;
+                return Ok(());
+            }
+            admin::write_starter_config(&target)?;
+            output
+                .data(&format!("wrote {}", target.display()), &json!({ "path": target, "written": true }))?;
+        }
+        Commands::Config(action) => run_config(action, &output, global, local, &cli_table)?,
+        Commands::Completions(_) | Commands::Man(_) => unreachable!("handled before config is loaded"),
     }
     Ok(())
+}
+
+fn run_config(
+    action: &ConfigCommand,
+    output: &Output,
+    global: Option<PathBuf>,
+    local: Option<PathBuf>,
+    cli_table: &toml::Table,
+) -> anyhow::Result<()> {
+    match action {
+        ConfigCommand::Path => {
+            let path = global.ok_or_else(no_config_dir)?;
+            let exists = path.exists();
+            output.data(&path.display().to_string(), &json!({ "path": path, "exists": exists }))?;
+        }
+        ConfigCommand::List => {
+            let entries = admin::config_entries(global, local, cli_table)?;
+            let human = entries
+                .iter()
+                .map(|e| format!("{} = {}  ({})", e.key, display_value(&e.value), e.source))
+                .collect::<Vec<_>>()
+                .join("\n");
+            output.data(&human, &entries)?;
+        }
+        ConfigCommand::Get { key } => {
+            let entries = admin::config_entries(global, local, cli_table)?;
+            let entry = entries.iter().find(|e| &e.key == key).ok_or_else(|| {
+                TptError::Usage(format!(
+                    "unknown config key `{key}`. Valid keys: {}.",
+                    admin::config_keys().join(", ")
+                ))
+            })?;
+            output.data(&display_value(&entry.value), entry)?;
+        }
+        ConfigCommand::Set { key, value, local: to_local } => {
+            let target = if *to_local {
+                PathBuf::from(LOCAL_CONFIG_FILE)
+            } else {
+                global.ok_or_else(no_config_dir)?
+            };
+            admin::set_config_value(&target, key, value)?;
+            output.data(
+                &format!("set {key} = {value} in {}", target.display()),
+                &json!({ "path": target, "key": key, "value": value }),
+            )?;
+        }
+        ConfigCommand::Edit => {
+            let path = global.ok_or_else(no_config_dir)?;
+            if !path.exists() {
+                admin::write_starter_config(&path)?;
+            }
+            open_in_editor(&path)?;
+            output.data(&format!("edited {}", path.display()), &json!({ "path": path }))?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes man pages (or prints the main page when no directory is given).
+fn man(args: &ManArgs) -> anyhow::Result<()> {
+    let root = Cli::command();
+    match &args.dir {
+        None => {
+            io::Write::write_all(&mut io::stdout().lock(), &admin::render_man(&root)?)?;
+        }
+        Some(dir) => {
+            for path in admin::write_man_pages(&root, dir)? {
+                println!("{}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The global config file: `--config` if given, else the default location.
+fn resolve_global(cli: &Cli) -> anyhow::Result<Option<PathBuf>> {
+    match &cli.config {
+        Some(path) if path.is_file() => Ok(Some(path.clone())),
+        Some(path) => Err(TptError::Config(ConfigError::in_file(path, "file not found (--config)")).into()),
+        None => Ok(global_config_path(DEFAULT_APP_NAME)),
+    }
+}
+
+fn no_config_dir() -> anyhow::Error {
+    TptError::Usage(
+        "no config location is available. Set XDG_CONFIG_HOME or HOME, or pass --config <PATH>.".into(),
+    )
+    .into()
+}
+
+/// Opens `path` in `$VISUAL`, `$EDITOR`, or a platform default. The variable may hold arguments.
+fn open_in_editor(path: &std::path::Path) -> anyhow::Result<()> {
+    let default = if cfg!(windows) { "notepad" } else { "vi" };
+    let editor = ["VISUAL", "EDITOR"]
+        .iter()
+        .find_map(|var| std::env::var(var).ok().filter(|v| !v.trim().is_empty()))
+        .unwrap_or_else(|| default.to_owned());
+    let mut parts = editor.split_whitespace();
+    let program = parts.next().unwrap_or(default);
+    let status = std::process::Command::new(program).args(parts).arg(path).status().map_err(|e| {
+        TptError::Usage(format!("cannot start editor `{program}`: {e}. Set $VISUAL or $EDITOR."))
+    })?;
+    if !status.success() {
+        return Err(TptError::Io(io::Error::other(format!("editor `{program}` exited with {status}"))).into());
+    }
+    Ok(())
+}
+
+/// Plain text for a value in human output: strings without quotes.
+fn display_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
 }
 
 /// Returns the output format requested on the command line or in `TPT_OUTPUT`.
