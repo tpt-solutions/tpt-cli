@@ -689,6 +689,33 @@ mod tests {
         assert!(parse_headers(&["X-Bad: a\r\nInjected: 1".to_owned()]).is_err());
     }
 
+    /// A deterministic pseudo-random byte stream, so the test is repeatable. It feeds the response
+    /// parser arbitrary input, some of it shaped like HTTP, and checks that nothing panics. This is
+    /// not coverage-guided fuzzing, which needs nightly. It only guards the parser against regressions.
+    #[test]
+    fn response_parser_survives_arbitrary_bytes() {
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let fragments: [&[u8]; 6] = [b"HTTP/1.1 ", b"\r\n", b"\r\n\r\n", b"Location: ", b"999", b":"];
+        for round in 0..2000 {
+            let len = (next() % 200) as usize;
+            let mut raw: Vec<u8> = Vec::with_capacity(len + 16);
+            if round % 2 == 0 {
+                raw.extend_from_slice(fragments[(next() % fragments.len() as u64) as usize]);
+            }
+            for _ in 0..len {
+                raw.push((next() & 0xFF) as u8);
+            }
+            let _ = head_end(&raw);
+            let _ = parse_reply(&raw);
+        }
+    }
+
     #[test]
     fn backoff_doubles_and_is_capped() {
         assert_eq!(backoff(1), Duration::from_millis(200));

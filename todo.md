@@ -3,23 +3,22 @@
 Publisher: TPT Solutions. Licence: MIT OR Apache-2.0 (dual). Binary: `tptcli` (renamed from `tpt` so the executable is not confused with the library and the config dir). Crate: `tpt-cli` (lib + bin).
 
 Decisions locked in:
-- Implementation notes (from building Phases 0-7):
-  - MSRV is 1.88, not 1.85, because the code uses let-chains. Tested on 1.88 and stable locally.
+- Implementation notes (from building Phases 0-7, updated after Phase 9 and Phase 10):
+  - MSRV is 1.88, not 1.85, because the code uses let-chains. Tested on 1.88 and stable.
   - `dirs` was dropped for `std::env::home_dir`. `dirs` 6 and 7 both pull in `option-ext` (MPL-2.0), which the policy forbids.
-  - The global config path is `~/.config/tpt/config.toml` on every OS, so Windows and macOS match Linux.
-  - `reqwest` is 0.12, not 0.13. The 0.13 `rustls` feature uses `aws-lc-rs`, which is C-based. 0.12 uses `ring` with `rustls-native-certs`.
-  - Two `deny.toml` exceptions were added: `ryu` (take its Apache-2.0 OR option) and `sync_wrapper` (Apache-2.0 only, needed by reqwest). The `sync_wrapper` one needs the maintainer's sign-off.
+  - The global config file is the first of `$XDG_CONFIG_HOME/tpt/config.toml`, `%APPDATA%\tpt\config.toml` (Windows) and `~/.config/tpt/config.toml` that exists. The first candidate is used when none exists.
+  - Networking is a built-in HTTP/1.1 client over `rustls` with the `tpt-crypto-rustls` provider. `reqwest`, `tokio` and `ring` are gone (Phase 9). `sync_wrapper` went with `reqwest`, so `deny.toml` has no licence exceptions.
   - `ping --timeout` sets the timeout. The report includes `timeout_secs`.
+  - The `tpt-crypto-rustls` git dependency is pinned to `e6b5fcb`, the revision on the remote `master`. Until the crypto work is published, the crate cannot go to crates.io.
 - Dependency licence policy: allow MIT, ISC, BSD-2/3, Zlib, Unicode-3.0, CC0, Unlicense. Apache-2.0 is accepted only as an "OR" alternative in a dual licence, never Apache-only or `AND`. No copyleft/MPL/CDLA.
-- Networking sits behind a `net` Cargo feature. The core lib stays fully MIT-clean. The `net` feature carries one documented exception: `ring` (Apache-2.0 AND ISC).
-- Use `rustls-native-certs` (OS cert store) instead of `webpki-roots`
-- Long term: replace `ring` (see the last phase)
-- Single crate, lib `tpt` + `tptcli` binary
-- `tpt ping <url>` does an HTTP GET and reports status and latency
-- Linux, macOS and Windows supported
-- Hand-rolled stderr logger (no logging crate)
-- GitHub + GitHub Actions
-- `tpt schema` emits a custom JSON command tree
+- Networking sits behind a `net` Cargo feature. The core lib stays fully MIT-clean with no C crypto. The `net` feature pulls in `rustls`, `tpt-crypto-rustls` and `url`, and no `ring`.
+- Use `rustls-native-certs` (OS cert store) instead of `webpki-roots`.
+- Single crate, lib `tpt` + `tptcli` binary.
+- `tptcli ping <url>` does an HTTP GET and reports status and latency.
+- Linux, macOS and Windows supported.
+- Hand-rolled stderr logger (no logging crate).
+- GitHub + GitHub Actions.
+- `tptcli schema` emits a custom JSON command tree, with an MCP-style tool format.
 
 ---
 
@@ -209,7 +208,7 @@ Out of scope here: Phase 9 (custom TLS/crypto) and crates.io publishing (blocked
 - [x] `install.sh` and `install.ps1` (checksum-verified)
 - [ ] Dockerfile (not started)
 - [ ] After the first release: Scoop and winget manifests, Homebrew formula
-- [ ] `cargo-fuzz` target for `net::parse_reply` / `read_head`; coverage job in CI
+- [ ] Coverage-guided fuzzing (`cargo-fuzz`) for `net` response parsing: deferred, needs nightly. Done instead: a deterministic test feeds 2000 pseudo-random inputs to the parser. Coverage job in CI: not started
 
 ### 10c: Extras (agent- and human-friendly)
 - [x] `schema --format mcp`: MCP-style tool definitions, one per leaf command, with JSON Schema `inputSchema`. Done as one format (`mcp`), not separate `json-schema` output. Snapshot updated deliberately
