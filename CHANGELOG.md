@@ -23,6 +23,7 @@ All notable changes to this project are recorded here. The format follows
   Only `http://` proxy URLs are supported.
 - `tptcli schema` lists the error codes (`error_codes`).
 - Cargo metadata for `cargo binstall`.
+- `templates/cli`, a `cargo-generate` template for a new CLI built on the framework.
 - A status line while `ping` runs on a human terminal.
 - A release workflow that builds archives for five targets, writes `SHA256SUMS` and publishes a GitHub Release.
 - `install.sh` and `install.ps1`, which verify the checksum before installing.

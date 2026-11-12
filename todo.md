@@ -221,7 +221,7 @@ Out of scope here: Phase 9 (custom TLS/crypto) and crates.io publishing (blocked
 - [x] `--debug` flag prints the Rust debug form of the error
 - [ ] Error hints with dynamic context (hints are still static strings)
 - [x] Error-code table exposed in `schema` (`error_codes`), kept in sync with `TptError::code` by a test
-- [ ] Scaffold for consumers: `cargo generate` template or `tptcli new`, based on `examples/basic_cmd`
+- [x] Scaffold for consumers: `templates/cli`, a `cargo-generate` template (chosen over `tptcli new` so templating stays out of the size-first binary). Rendered by hand and built against the local library; not yet tested through `cargo generate` itself
 
 ## Backlog / not in scope (decide later)
 - [ ] Publish to crates.io (check the `tpt-cli` name is available)

@@ -228,6 +228,20 @@ internal detail that the normal message leaves out. Use it when reporting a bug.
 
 The same table is in `tptcli schema` under `exit_codes`.
 
+## Starting a new CLI
+
+`templates/cli` is a [`cargo-generate`](https://github.com/cargo-generate/cargo-generate) template for a new
+command-line tool built on this framework. It gives you config layering, the JSON envelope, typed errors and
+the `schema` command, with one example command to replace.
+
+```sh
+cargo install cargo-generate
+cargo generate --git https://github.com/TPT-Solutions/tpt-cli templates/cli
+```
+
+The template depends on `tpt-cli` from the `master` branch. Pin a release tag in the generated `Cargo.toml`
+once one is published.
+
 ## Library usage
 
 Other TPT projects can use `tpt-cli` as a library. Turn off default features to leave out

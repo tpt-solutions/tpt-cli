@@ -1,0 +1,9 @@
+[template]
+cargo_generate_version = ">=0.18.0"
+# Generates a new CLI that uses the tpt library for config, output, errors and schema.
+# Usage: cargo generate --git https://github.com/TPT-Solutions/tpt-cli templates/cli
+
+[placeholders.app_name]
+type = "string"
+prompt = "Command name (lower case, letters, digits and dashes, starting with a letter)"
+regex = "^[a-z][a-z0-9-]*$"
