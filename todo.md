@@ -205,7 +205,7 @@ Out of scope here: Phase 9 (custom TLS/crypto) and crates.io publishing (blocked
 - [x] `tptcli config {path,list,get,set,edit}` and a global `--config <path>` flag; `config list` shows each value's source (default, file, env, flag)
 - [x] `tptcli doctor`: version, config files and parse status, resolved values with sources, DNS and TLS root-store check, optional connectivity test; works with `--output json`
 - [x] Release workflow on tag: linux/macos/windows builds (x86_64 and aarch64 where possible), archives, `SHA256SUMS`, release notes from the CHANGELOG. Evaluate `cargo-dist` first (decision needed: cargo-dist or a hand-written workflow)
-- [ ] `[package.metadata.binstall]` for `cargo binstall`; Cargo.toml metadata (repository, keywords, categories)
+- [x] `[package.metadata.binstall]` for `cargo binstall`; Cargo.toml metadata (repository, keywords, categories)
 - [x] `install.sh` and `install.ps1` (checksum-verified)
 - [ ] Dockerfile (not started)
 - [ ] After the first release: Scoop and winget manifests, Homebrew formula
@@ -216,11 +216,11 @@ Out of scope here: Phase 9 (custom TLS/crypto) and crates.io publishing (blocked
 - [x] Minimal field selection for JSON output (`--select data.status`, dot-path, no heavy deps)
 - [x] Progress line (documented spinner was never built): shown for `ping` on a human terminal only, off for JSON, pipes and `--quiet`. Not animated, so it is a status line rather than a spinner
 - [x] `ping`: `--retries` with backoff (transient failures only), `--header`, timing breakdown (dns, connect, tls, ttfb) and `attempts` in the JSON output
-- [ ] `ping --count`/`--interval`: deferred, because a partial failure across several pings has no clean exit code or JSON shape yet (decide first)
-- [ ] `ping` proxy support (`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`): deferred, HTTPS needs a CONNECT tunnel
+- [x] `ping --count`/`--interval`: every result is printed; the exit code is non-zero if any ping failed (the code of the last failure). The JSON data has `sent`, `received` and a `results` array, and no second error envelope is printed
+- [x] `ping` proxy support from `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (lower case too): plain http sends the absolute URL, https uses a CONNECT tunnel. Limits: `http://` proxy URLs only, no proxy credentials
 - [x] `--debug` flag prints the Rust debug form of the error
 - [ ] Error hints with dynamic context (hints are still static strings)
-- [ ] Error-code table exposed in `schema` (exit codes are already listed; error codes are not)
+- [x] Error-code table exposed in `schema` (`error_codes`), kept in sync with `TptError::code` by a test
 - [ ] Scaffold for consumers: `cargo generate` template or `tptcli new`, based on `examples/basic_cmd`
 
 ## Backlog / not in scope (decide later)

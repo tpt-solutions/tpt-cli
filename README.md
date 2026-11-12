@@ -74,7 +74,16 @@ so on between tries. Each try gets the full timeout. `--header` (or `-H`) adds a
 be repeated. `Host`, `Connection` and `Content-Length` are set by tptcli and cannot be overridden.
 
 The JSON output includes `attempts` and a `timings` object with `dns_ms`, `connect_ms`, `tls_ms` (null for
-plain http) and `ttfb_ms`. Proxy support is not implemented yet.
+plain http) and `ttfb_ms`.
+
+`--count N` sends N pings, `--interval SECS` (default 1) waits between them. Every result is printed. The
+exit code is non-zero if any ping failed, and it is the code of the last failure. In JSON mode the data has
+`sent`, `received` and a `results` array, and nothing else is printed.
+
+Proxies come from `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (lower-case names work too). Plain http requests
+go through the proxy with the full URL. HTTPS requests ask the proxy for a `CONNECT` tunnel, so TLS still runs
+end to end. Only `http://` proxy URLs are supported, and proxy credentials in the URL are not.
+`NO_PROXY` takes host names, `.suffix` entries, and `*`.
 
 On a human terminal, `ping` shows a `requesting <url>...` status line while it runs. The line is removed
 when the request finishes. It is not shown with `--output json`, when output is piped, or with `--quiet`.

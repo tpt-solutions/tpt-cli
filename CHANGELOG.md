@@ -18,6 +18,11 @@ All notable changes to this project are recorded here. The format follows
 - `--debug` prints the internal detail of an error.
 - `tptcli ping --retries N` (for refused or reset connections and timeouts) and `--header NAME: VALUE`.
   The JSON output now includes `attempts` and per-stage `timings`.
+- `tptcli ping --count N` and `--interval SECS`. The exit code is non-zero if any ping fails.
+- Proxy support for `ping` from `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`. HTTPS uses a `CONNECT` tunnel.
+  Only `http://` proxy URLs are supported.
+- `tptcli schema` lists the error codes (`error_codes`).
+- Cargo metadata for `cargo binstall`.
 - A status line while `ping` runs on a human terminal.
 - A release workflow that builds archives for five targets, writes `SHA256SUMS` and publishes a GitHub Release.
 - `install.sh` and `install.ps1`, which verify the checksum before installing.
